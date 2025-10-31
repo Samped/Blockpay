@@ -198,7 +198,7 @@ const IntuitionAgentFrontend = () => {
               {sidebarOpen ? <ChevronLeft className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
             </button>
             <div className="flex items-center gap-2">
-              <Bot className="w-5 h-5 text-sky-400" />
+              <img src="/logo.png" alt="Logo" className="h-10 w-auto object-contain rounded px-2 py-1 ring-1 ring-zinc-300 dark:ring-zinc-700 bg-white dark:bg-white" />
               <span className="font-medium">BlockPay </span>
             </div>
           </div>
@@ -207,7 +207,7 @@ const IntuitionAgentFrontend = () => {
             {walletConnected ? (
               <>
                 <div className="text-sm text-zinc-400">
-                  {balance} ETH
+                  {balance} INT
                 </div>
                 <div className="px-3 py-1.5 bg-zinc-900 rounded-lg text-sm font-mono">
                   {shortenAddress(walletAddress)}
@@ -229,8 +229,8 @@ const IntuitionAgentFrontend = () => {
           <div className="max-w-3xl mx-auto px-4 py-8">
             {messages.length === 0 ? (
               <div className="text-center py-12">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-sky-500/10 rounded-2xl mb-4">
-                  <Bot className="w-8 h-8 text-sky-400" />
+                <div className="inline-flex items-center justify-center w-24 h-24 bg-sky-500/10 rounded-2xl mb-4">
+                  <img src="/logo.png" alt="Logo" className="w-24 h-24 object-contain rounded ring-1 ring-zinc-300 dark:ring-zinc-700 bg-white dark:bg-white" />
                 </div>
                 <h2 className="text-2xl font-medium mb-2">BlockPay Agent</h2>
                 <p className="text-zinc-500 mb-8">
@@ -268,8 +268,8 @@ const IntuitionAgentFrontend = () => {
                 {messages.map(msg => (
                   <div key={msg.id} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : ''}`}>
                     {msg.role !== 'user' && (
-                      <div className="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center flex-shrink-0">
-                        <Bot className="w-5 h-5 text-sky-400" />
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ring-1 ring-zinc-300 dark:ring-zinc-700 bg-white dark:bg-white">
+                        <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
                       </div>
                     )}
                     <div className={`flex-1 max-w-2xl ${msg.role === 'user' ? 'text-right' : ''}`}>
@@ -304,8 +304,8 @@ const IntuitionAgentFrontend = () => {
                 ))}
                 {isProcessing && (
                   <div className="flex gap-4">
-                    <div className="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center flex-shrink-0">
-                      <Bot className="w-5 h-5 text-sky-400" />
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ring-1 ring-zinc-300 dark:ring-zinc-700 bg-white dark:bg-white">
+                      <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
                     </div>
                     <div className="flex items-center gap-1">
                       <div className="w-2 h-2 bg-zinc-600 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>

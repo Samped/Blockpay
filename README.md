@@ -5,7 +5,7 @@ It enables intelligent on-chain actions like sending tokens, fetching contract d
 
 Features
 
-Connect to Intuition Testnet (Chain ID: 13579)
+Connect to Intuition Testnet (Chain ID: 13579) 
 Send, receive, and manage ERC20 tokens on intuition network
 Interact with smart contracts (ERC20, WETH, etc.)
 Fetch price feeds using Pyth action provider
