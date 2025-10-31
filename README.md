@@ -1,67 +1,29 @@
-# Onchain Agent Powered by AgentKit
+BlockPay Agent — Intuition Network Integration
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with `create-onchain-agent`.  
+This project integrates a blockchain agent powered by Coinbase AgentKit to interact seamlessly with the Intuition Testnet.
+It enables intelligent on-chain actions like sending tokens, fetching contract data, swapping assets, and interacting with ERC20 contracts, all through natural language input.
 
-It integrates [AgentKit](https://github.com/coinbase/agentkit) to provide AI-driven interactions with on-chain capabilities.
+Features
 
-## Getting Started
+Connect to Intuition Testnet (Chain ID: 13579)
+Send, receive, and manage ERC20 tokens on intuition network
+Interact with smart contracts (ERC20, WETH, etc.)
+Fetch price feeds using Pyth action provider
+Integrate with a front-end chat UI for natural interactions
 
-First, install dependencies:
-
-```sh
-npm install
-```
-
-Then, configure your environment variables:
-
-```sh
-mv .env.local .env
-```
-
-Run the development server:
-
-```sh
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser to see the project.
+Project Structure
+BlockPay/
+├── app/                   # Next.js application frontend
+├── pages/api/agent/       # API endpoint for the agent
+├── prepareAgentkit.ts     # Initializes AgentKit and wallet provider
+├── package.json
+├── tsconfig.json
+├── tailwind.config.ts
+└── .env                   # Environment variables
 
 
-## Configuring Your Agent
 
-You can [modify your configuration](https://github.com/coinbase/agentkit/tree/main/typescript/agentkit#usage) of the agent. By default, your agentkit configuration occurs in the `/api/agent/prepare-agentkit.ts` file, and agent instantiation occurs in the `/api/agent/create-agent.ts` file.
-
-### 1. Select Your LLM  
-Modify the OpenAI model instantiation to use the model of your choice.
-
-### 2. Select Your Wallet Provider  
-AgentKit requires a **Wallet Provider** to interact with blockchain networks.
-
-### 3. Select Your Action Providers  
-Action Providers define what your agent can do. You can use built-in providers or create your own.
-
----
-
-## Next Steps
-
-- Explore the AgentKit README: [AgentKit Documentation](https://github.com/coinbase/agentkit)
-- Learn more about available Wallet Providers & Action Providers.
-- Experiment with custom Action Providers for your specific use case.
-
----
-
-## Learn More
-
-- [Learn more about CDP](https://docs.cdp.coinbase.com/)
-- [Learn more about AgentKit](https://docs.cdp.coinbase.com/agentkit/docs/welcome)
-- [Learn more about Next.js](https://nextjs.org/docs)
-- [Learn more about Tailwind CSS](https://tailwindcss.com/docs)
-
----
-
-## Contributing
-
-Interested in contributing to AgentKit? Follow the contribution guide:
-
-- [Contribution Guide](https://github.com/coinbase/agentkit/blob/main/CONTRIBUTING.md)
-- Join the discussion on [Discord](https://discord.gg/CDP)
+Author
+Ottah Samuel Sunday
+Enugu, Nigeria
+michaelsamuelpedro@gmail.com
