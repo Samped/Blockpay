@@ -12,6 +12,7 @@ Fetch price feeds using Pyth action provider
 Integrate with a front-end chat UI for natural interactions
 
 Project Structure
+```
 BlockPay/
 ├── app/                   # Next.js application frontend
 ├── pages/api/agent/       # API endpoint for the agent
@@ -20,6 +21,7 @@ BlockPay/
 ├── tsconfig.json
 ├── tailwind.config.ts
 └── .env                   # Environment variables
+```
 
 
 
