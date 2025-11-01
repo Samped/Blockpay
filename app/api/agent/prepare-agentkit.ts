@@ -60,7 +60,7 @@ export async function prepareAgentkitAndWalletProvider(): Promise<{
         name: "Intuition Testnet",
         nativeCurrency: {
           name: "Intuition",
-          symbol: "INT",
+          symbol: "tTRUST",
           decimals: 18,
         },
       },
