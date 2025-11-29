@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { usePublicClient } from 'wagmi'
 import { intuitionClient, Atom, TrustScore, Triple } from '@/lib/intuitionClient'
 
@@ -51,6 +51,9 @@ export function UserProfile({ address }: UserProfileProps) {
     dribbble: '',
   })
 
+  // Store fetchUserData in a ref so it can be called manually
+  const fetchUserDataRef = useRef<(() => Promise<void>) | null>(null)
+
   useEffect(() => {
     const fetchUserData = async () => {
       if (!address) return
@@ -72,12 +75,7 @@ export function UserProfile({ address }: UserProfileProps) {
         const { atom: userAtom, trustScore, completedJobs, createdArtworks, profileData: atomData } = profileData
 
         if (!userAtom) {
-          console.warn('⚠️ No atom found for address:', address)
-          console.log('💡 This could mean:')
-          console.log('   1. Atom was just created and GraphQL hasn\'t indexed it yet (wait 10-30 seconds)')
-          console.log('   2. Atom was created with different data structure')
-          console.log('   3. Query filters don\'t match the atom')
-          console.log('   4. Atom exists but doesn\'t have type="User" set')
+          console.warn('⚠️ No atom found via getUserProfileData, trying direct query...')
           
           // Try a direct query to see if ANY atoms exist for this creator
           try {
@@ -85,14 +83,17 @@ export function UserProfile({ address }: UserProfileProps) {
               query CheckAtoms($address: String!) {
                 atoms(
                   where: { creator_id: { _eq: $address } }
-                  limit: 5
+                  limit: 10
                   order_by: { created_at: desc }
                 ) {
-                  id
                   term_id
                   type
+                  label
+                  emoji
+                  image
                   data
                   created_at
+                  creator_id
                 }
               }
             `
@@ -106,48 +107,278 @@ export function UserProfile({ address }: UserProfileProps) {
             })
             const result = await response.json()
             if (result.data?.atoms?.length > 0) {
-              console.log('🔍 Found', result.data.atoms.length, 'atoms created by this address:')
+              console.log('✅ Found', result.data.atoms.length, 'atoms created by this address')
+              
+              // Find the best matching User profile atom
+              let bestAtom: any = null
+              let bestParsedData: any = {}
+              let bestScore = 0
+              
               result.data.atoms.forEach((atom: any, idx: number) => {
-                console.log(`   ${idx + 1}. ID: ${atom.id?.substring(0, 30)}, Type: ${atom.type || 'null'}, Has data: ${!!atom.data}`)
+                // Try to parse data to see what's in it
+                let parsedData: any = {}
+                try {
+                  if (typeof atom.data === 'string') {
+                    // Skip if it's just a type description like "json object" or "JsonObject"
+                    const dataStr = atom.data.trim()
+                    if ((dataStr.toLowerCase() === 'json object' || dataStr === 'JsonObject') && dataStr.length < 50) {
+                      console.log(`      ⚠️ Skipping atom ${idx + 1} - data is just type description: "${dataStr}"`)
+                      parsedData = {}
+                    } else {
+                      try {
+                        parsedData = JSON.parse(atom.data)
+                        console.log(`      ✅ Successfully parsed JSON data for atom ${idx + 1}`)
+                      } catch (parseErr) {
+                        // If it's not valid JSON, check if it's a simple string value
+                        if (atom.data.length > 0 && atom.data.length < 200) {
+                          // Might be a simple string, not JSON
+                          parsedData = { value: atom.data }
+                        } else {
+                          throw parseErr
+                        }
+                      }
+                    }
+                  } else if (atom.data && typeof atom.data === 'object') {
+                    parsedData = atom.data
+                    console.log(`      ✅ Using atom ${idx + 1} data as object`)
+                  }
+                } catch (e) {
+                  console.warn(`      ⚠️ Could not parse atom ${idx + 1} data:`, e)
+                  parsedData = {}
+                }
+                
+                console.log(`   ${idx + 1}. Term ID: ${atom.term_id?.substring(0, 30)}`)
+                console.log(`      Type: ${atom.type || 'null'}`)
+                console.log(`      Label: ${atom.label || 'null'}`)
+                console.log(`      Has data: ${!!atom.data}`)
+                console.log(`      Data keys: ${Object.keys(parsedData).slice(0, 10).join(', ')}`)
+                console.log(`      Parsed data sample:`, {
+                  name: parsedData.name,
+                  bio: parsedData.bio?.substring(0, 30),
+                  email: parsedData.email,
+                  twitter: parsedData.twitter
+                })
+                
+                // Check if this looks like a User profile
+                // Profile data indicators
+                const hasName = !!(parsedData.name)
+                const hasBio = !!(parsedData.bio)
+                const hasEmail = !!(parsedData.email)
+                const hasSocial = !!(parsedData.twitter || parsedData.github || parsedData.behance || parsedData.dribbble)
+                const hasProfileData = hasName || hasBio || hasEmail || hasSocial
+                
+                // Type indicators
+                const isUserType = atom.type === 'User' || parsedData.type === 'User'
+                const hasAddress = !!(parsedData.address || parsedData.wallet)
+                
+                // Label indicators (skip "json object" labels)
+                const hasValidLabel = atom.label && 
+                  !atom.label.toLowerCase().includes('json') && 
+                  atom.label !== 'JsonObject' &&
+                  atom.label.length > 0
+                
+                const isUserProfile = isUserType || hasAddress || hasProfileData || (hasValidLabel && hasProfileData)
+                
+                console.log(`      Profile check for atom ${idx + 1}:`, {
+                  isUserType,
+                  hasAddress,
+                  hasProfileData,
+                  hasName,
+                  hasBio,
+                  hasEmail,
+                  hasSocial,
+                  hasValidLabel,
+                  isUserProfile
+                })
+                
+                if (isUserProfile) {
+                  // Score atoms based on how much profile data they have
+                  const profileDataScore = [
+                    parsedData.name,
+                    parsedData.bio,
+                    parsedData.email,
+                    parsedData.twitter,
+                    parsedData.github,
+                    parsedData.website,
+                    parsedData.behance,
+                    parsedData.dribbble
+                  ].filter(Boolean).length
+                  
+                  console.log(`      ✅ This is a User profile! Score: ${profileDataScore}`)
+                  
+                  if (profileDataScore > bestScore) {
+                    bestAtom = atom
+                    bestParsedData = parsedData
+                    bestScore = profileDataScore
+                    console.log(`      ⭐ New best atom! (Score: ${bestScore})`)
+                  }
+                } else {
+                  console.log(`      ⚠️ Not a User profile`)
+                }
               })
-              console.log('💡 The query should have found these atoms. Check Strategy 1 logs above.')
+              
+              // Use the best matching atom if found, OR use the first atom if we have any atoms at all
+              // (even if it doesn't have a high score, it's better than nothing)
+              if (bestAtom) {
+                // If we have a good match (score > 0), use it
+                // Otherwise, if we have ANY atom, use the first one (might be a profile we just haven't recognized)
+                if (bestScore === 0 && result.data.atoms.length > 0) {
+                  // Use the first atom as fallback
+                  const firstAtom = result.data.atoms[0]
+                  let firstParsedData: any = {}
+                  
+                  try {
+                    if (typeof firstAtom.data === 'string') {
+                      const dataStr = firstAtom.data.trim()
+                      if (!(dataStr.toLowerCase() === 'json object' || dataStr === 'JsonObject') || dataStr.length >= 50) {
+                        try {
+                          firstParsedData = JSON.parse(firstAtom.data)
+                        } catch {}
+                      }
+                    } else if (firstAtom.data && typeof firstAtom.data === 'object') {
+                      firstParsedData = firstAtom.data
+                    }
+                  } catch {}
+                  
+                  bestAtom = firstAtom
+                  bestParsedData = firstParsedData
+                  console.log('⚠️ No high-scoring profile found, using first atom as fallback')
+                }
+                
+                console.log('✅✅✅ Using atom as user profile!')
+                console.log('   Atom term_id:', bestAtom.term_id?.substring(0, 30))
+                console.log('   Profile data score:', bestScore)
+                console.log('   Label:', bestAtom.label)
+                console.log('   Type:', bestAtom.type)
+                console.log('   Profile data:', {
+                  name: bestParsedData.name,
+                  bio: bestParsedData.bio?.substring(0, 50),
+                  email: bestParsedData.email,
+                  twitter: bestParsedData.twitter,
+                  github: bestParsedData.github,
+                  dataKeys: Object.keys(bestParsedData)
+                })
+                
+                const foundAtom = {
+                  ...bestAtom,
+                  id: bestAtom.term_id,
+                  term_id: bestAtom.term_id,
+                  data: bestParsedData,
+                  type: bestAtom.type || bestParsedData.type || 'User'
+                }
+                
+                // Get name from parsed data, skip label if it's "json object"
+                let displayName = bestParsedData.name
+                // If no name in parsed data, try label (but skip "json object" type labels)
+                if (!displayName && bestAtom.label) {
+                  const labelLower = bestAtom.label.toLowerCase()
+                  if (!labelLower.includes('json') && bestAtom.label !== 'JsonObject' && bestAtom.label.length > 0) {
+                    displayName = bestAtom.label
+                    console.log(`   Using label as name: "${displayName}"`)
+                  }
+                }
+                // If still no name, try to extract from other fields
+                if (!displayName) {
+                  if (bestParsedData.bio) {
+                    displayName = bestParsedData.bio.substring(0, 30)
+                  } else if (bestParsedData.email) {
+                    displayName = bestParsedData.email.split('@')[0]
+                  } else if (bestParsedData.twitter) {
+                    displayName = bestParsedData.twitter.replace('@', '')
+                  } else if (bestParsedData.github) {
+                    displayName = bestParsedData.github
+                  }
+                }
+                
+                console.log(`   Final display name: "${displayName}"`)
+                
+                const userDataToSet = {
+                  atom: foundAtom,
+                  trustScore: null,
+                  completedJobs: 0,
+                  createdArtworks: 0,
+                  bio: bestParsedData.bio || '',
+                  name: displayName || '',
+                  email: bestParsedData.email || '',
+                  website: bestParsedData.website || '',
+                  socialLinks: {
+                    twitter: bestParsedData.twitter || bestParsedData.socialLinks?.twitter,
+                    github: bestParsedData.github || bestParsedData.socialLinks?.github,
+                    behance: bestParsedData.behance || bestParsedData.socialLinks?.behance,
+                    dribbble: bestParsedData.dribbble || bestParsedData.socialLinks?.dribbble,
+                  },
+                }
+                
+                console.log('📝 Setting user data:', {
+                  hasAtom: !!userDataToSet.atom,
+                  atomId: userDataToSet.atom?.id?.substring(0, 30),
+                  name: userDataToSet.name,
+                  bio: userDataToSet.bio?.substring(0, 30),
+                  email: userDataToSet.email,
+                  twitter: userDataToSet.socialLinks.twitter
+                })
+                
+                setUserData(userDataToSet)
+                setEditForm({
+                  name: displayName || '',
+                  bio: bestParsedData.bio || '',
+                  email: bestParsedData.email || '',
+                  website: bestParsedData.website || '',
+                  twitter: bestParsedData.twitter || bestParsedData.socialLinks?.twitter || '',
+                  github: bestParsedData.github || bestParsedData.socialLinks?.github || '',
+                  behance: bestParsedData.behance || bestParsedData.socialLinks?.behance || '',
+                  dribbble: bestParsedData.dribbble || bestParsedData.socialLinks?.dribbble || '',
+                })
+                setLoading(false)
+                console.log('✅✅✅ Profile data set successfully! Dashboard should now show profile.')
+                return
+              } else {
+                console.log('⚠️ Found atoms but none could be used as profile')
+              }
             } else {
               console.log('🔍 Direct query also found 0 atoms - they may not be indexed yet')
             }
           } catch (checkError) {
-            console.warn('Could not run diagnostic query:', checkError)
+            console.error('❌ Error in diagnostic query:', checkError)
           }
         }
 
-        // Extract user data from atom
-        setUserData({
-          atom: userAtom,
-          trustScore,
-          completedJobs,
-          createdArtworks,
-          bio: atomData.bio || '',
-          name: atomData.name || '',
-          email: atomData.email || '',
-          website: atomData.website || '',
-          socialLinks: {
-            twitter: atomData.twitter || atomData.socialLinks?.twitter,
-            github: atomData.github || atomData.socialLinks?.github,
-            behance: atomData.behance || atomData.socialLinks?.behance,
-            dribbble: atomData.dribbble || atomData.socialLinks?.dribbble,
-          },
-        })
+        // Ensure atom has id set from term_id (only if userAtom exists)
+        if (userAtom) {
+          if (!userAtom.id && userAtom.term_id) {
+            userAtom.id = userAtom.term_id
+          }
+          
+          // Extract user data from atom
+          setUserData({
+            atom: userAtom,
+            trustScore,
+            completedJobs,
+            createdArtworks,
+            bio: atomData.bio || '',
+            name: atomData.name || userAtom.label || '',
+            email: atomData.email || '',
+            website: atomData.website || '',
+            socialLinks: {
+              twitter: atomData.twitter || atomData.socialLinks?.twitter,
+              github: atomData.github || atomData.socialLinks?.github,
+              behance: atomData.behance || atomData.socialLinks?.behance,
+              dribbble: atomData.dribbble || atomData.socialLinks?.dribbble,
+            },
+          })
 
-        // Set edit form with current data
-        setEditForm({
-          name: atomData.name || '',
-          bio: atomData.bio || '',
-          email: atomData.email || '',
-          website: atomData.website || '',
-          twitter: atomData.twitter || atomData.socialLinks?.twitter || '',
-          github: atomData.github || atomData.socialLinks?.github || '',
-          behance: atomData.behance || atomData.socialLinks?.behance || '',
-          dribbble: atomData.dribbble || atomData.socialLinks?.dribbble || '',
-        })
+          // Set edit form with current data
+          setEditForm({
+            name: atomData.name || '',
+            bio: atomData.bio || '',
+            email: atomData.email || '',
+            website: atomData.website || '',
+            twitter: atomData.twitter || atomData.socialLinks?.twitter || '',
+            github: atomData.github || atomData.socialLinks?.github || '',
+            behance: atomData.behance || atomData.socialLinks?.behance || '',
+            dribbble: atomData.dribbble || atomData.socialLinks?.dribbble || '',
+          })
+        }
       } catch (error) {
         console.error('❌ Error fetching user data:', error)
       } finally {
@@ -155,24 +386,21 @@ export function UserProfile({ address }: UserProfileProps) {
       }
     }
 
-    fetchUserData()
+    // Store the function in ref for manual refresh
+    fetchUserDataRef.current = fetchUserData
     
-    // Also set up a refresh interval to check for newly indexed atoms
-    const refreshInterval = setInterval(() => {
-      if (!userData.atom && address) {
-        console.log('🔄 Auto-refreshing profile data...')
-        fetchUserData()
-      }
-    }, 10000) // Check every 10 seconds if no atom found
-
-    return () => clearInterval(refreshInterval)
-  }, [address])
+    // Only fetch on mount or when address changes (not auto-refresh)
+    fetchUserData()
+  }, [address, publicClient])
 
   const handleSave = async () => {
-    if (!userData.atom?.id) {
-      console.error('Cannot save: No atom ID found')
+    const atomId = userData.atom?.term_id || userData.atom?.id
+    if (!atomId) {
+      console.error('Cannot save: No atom ID or term_id found')
       return
     }
+    
+    console.log('💾 Saving profile with atom ID:', atomId)
 
     try {
       // Update atom data via GraphQL
@@ -190,13 +418,16 @@ export function UserProfile({ address }: UserProfileProps) {
       }
 
       const mutation = `
-        mutation UpdateAtom($id: String!, $data: jsonb!) {
-          update_atoms_by_pk(
-            pk_columns: { id: $id }
+        mutation UpdateAtom($term_id: String!, $data: jsonb!) {
+          update_atoms(
+            where: { term_id: { _eq: $term_id } }
             _set: { data: $data }
           ) {
-            id
-            data
+            affected_rows
+            returning {
+              term_id
+              data
+            }
           }
         }
       `
@@ -207,7 +438,7 @@ export function UserProfile({ address }: UserProfileProps) {
         body: JSON.stringify({
           query: mutation,
           variables: {
-            id: userData.atom.id,
+            term_id: atomId,
             data: updatedData
           }
         })
@@ -316,18 +547,32 @@ export function UserProfile({ address }: UserProfileProps) {
 
   const trustInfo = getTrustLevel(userData.trustScore?.score || null)
 
+  const handleRefresh = async () => {
+    if (fetchUserDataRef.current) {
+      await fetchUserDataRef.current()
+    }
+  }
+
   return (
     <div className="bg-white rounded-2xl shadow-card p-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold text-gray-900">Profile Information</h2>
-        {!isEditing ? (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => setIsEditing(true)}
-            className="px-4 py-2 text-sm font-medium rounded-full border border-gray-300 text-gray-900 hover:border-primary hover:text-primary transition-colors"
+            onClick={handleRefresh}
+            className="px-3 py-2 text-sm font-medium rounded-full border border-gray-300 text-gray-900 hover:border-primary hover:text-primary transition-colors"
+            title="Refresh profile data"
           >
-            Edit Profile
+            🔄
           </button>
-        ) : (
+          {!isEditing ? (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="px-4 py-2 text-sm font-medium rounded-full border border-gray-300 text-gray-900 hover:border-primary hover:text-primary transition-colors"
+            >
+              Edit Profile
+            </button>
+          ) : (
           <div className="flex gap-2">
             <button
               onClick={() => {
@@ -354,7 +599,8 @@ export function UserProfile({ address }: UserProfileProps) {
               Save Changes
             </button>
           </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="space-y-6">

@@ -466,7 +466,6 @@ export class IntuitionClient {
               const query = `
                 query GetAtomByTermId($termId: String!) {
                   atoms(where: { term_id: { _eq: $termId } }, limit: 1) {
-                    id
                     term_id
                     type
                     label
@@ -501,7 +500,6 @@ export class IntuitionClient {
               limit: 50
               order_by: { created_at: desc }
             ) {
-              id
               term_id
               type
               label
@@ -510,7 +508,6 @@ export class IntuitionClient {
               data
               creator_id
               created_at
-              vault_id
               block_number
             }
           }
@@ -525,7 +522,7 @@ export class IntuitionClient {
               parsedData = typeof a.data === 'string' ? JSON.parse(a.data) : (a.data || {})
             } catch {}
             return {
-              id: a.id?.substring(0, 20),
+              term_id: a.term_id?.substring(0, 20),
               type: a.type || parsedData?.type || 'unknown',
               has_data: !!a.data,
               data_type: typeof a.data,
@@ -593,7 +590,17 @@ export class IntuitionClient {
           }
           
           if (userAtom) {
-            console.log('✅ Found user atom via creator_id:', userAtom.id?.substring(0, 30))
+            // Use term_id as the id field (since GraphQL doesn't have id)
+            if (!userAtom.id && userAtom.term_id) {
+              userAtom.id = userAtom.term_id
+            }
+            
+            // Use term_id as the id field (since GraphQL doesn't have id)
+            if (!userAtom.id && userAtom.term_id) {
+              userAtom.id = userAtom.term_id
+            }
+            
+            console.log('✅ Found user atom via creator_id:', userAtom.term_id?.substring(0, 30) || userAtom.id?.substring(0, 30))
             console.log('   Atom type:', userAtom.type)
             console.log('   Has data:', !!userAtom.data)
             console.log('   Creator ID:', userAtom.creator_id?.substring(0, 20))
@@ -611,27 +618,21 @@ export class IntuitionClient {
         console.warn('⚠️ Strategy 1 failed:', err1)
       }
 
-      // Strategy 2: Query by type=User AND data contains address
-      console.log('📡 Strategy 2: Querying by type=User and data field...')
+      // Strategy 2: Query by type=User (simplified - data field filtering is complex in GraphQL)
+      console.log('📡 Strategy 2: Querying by type=User...')
       try {
         const query2 = `
-          query GetUserProfileByData($address: String!) {
+          query GetUserProfileByType($address: String!) {
             atoms(
               where: {
                 _and: [
                   { type: { _eq: "User" } }
-                  {
-                    _or: [
-                      { data: { _contains: { address: $address } } }
-                      { data: { _contains: { wallet: $address } } }
-                    ]
-                  }
+                  { creator_id: { _eq: $address } }
                 ]
               }
               limit: 20
               order_by: { created_at: desc }
             ) {
-              id
               term_id
               type
               label
@@ -640,7 +641,6 @@ export class IntuitionClient {
               data
               creator_id
               created_at
-              vault_id
               block_number
             }
           }
@@ -649,17 +649,26 @@ export class IntuitionClient {
         console.log('📊 Strategy 2 results:', data2?.atoms?.length || 0, 'atoms found')
         
         if (data2?.atoms?.length > 0) {
+          // Find atom with matching address in data
           const matchingAtom = data2.atoms.find((atom: any) => {
-            const atomData = atom.data || {}
-            return (
-              atomData.address?.toLowerCase() === addr ||
-              atomData.wallet?.toLowerCase() === addr ||
-              atom.creator_id?.toLowerCase() === addr
-            )
-          })
+            try {
+              const atomData = typeof atom.data === 'string' ? JSON.parse(atom.data) : (atom.data || {})
+              return (
+                atomData.address?.toLowerCase() === addr ||
+                atomData.wallet?.toLowerCase() === addr ||
+                atom.creator_id?.toLowerCase() === addr
+              )
+            } catch {
+              return atom.creator_id?.toLowerCase() === addr
+            }
+          }) || data2.atoms[0] // Fallback to first atom if no exact match
           
           if (matchingAtom) {
-            console.log('✅ Found user atom via data field:', matchingAtom.id)
+            // Use term_id as the id field
+            if (!matchingAtom.id && matchingAtom.term_id) {
+              matchingAtom.id = matchingAtom.term_id
+            }
+            console.log('✅ Found user atom via type=User:', matchingAtom.term_id || matchingAtom.id)
             return matchingAtom as Atom
           }
         }
@@ -677,7 +686,6 @@ export class IntuitionClient {
               limit: 100
               order_by: { created_at: desc }
             ) {
-              id
               term_id
               type
               label
@@ -686,7 +694,6 @@ export class IntuitionClient {
               data
               creator_id
               created_at
-              vault_id
               block_number
             }
           }
@@ -730,7 +737,11 @@ export class IntuitionClient {
           }
           
           if (matchingAtom) {
-            console.log('✅ Found user atom via broad search:', matchingAtom.id)
+            // Use term_id as the id field
+            if (!matchingAtom.id && matchingAtom.term_id) {
+              matchingAtom.id = matchingAtom.term_id
+            }
+            console.log('✅ Found user atom via broad search:', matchingAtom.term_id || matchingAtom.id)
             console.log('   Creator ID:', matchingAtom.creator_id)
             console.log('   Atom type:', matchingAtom.type)
             return matchingAtom as Atom
@@ -759,7 +770,11 @@ export class IntuitionClient {
               )
             })
             if (matchingAtom) {
-              console.log('✅ Found user atom via REST API:', matchingAtom.id)
+              // Use term_id as the id field if needed
+              if (!matchingAtom.id && matchingAtom.term_id) {
+                matchingAtom.id = matchingAtom.term_id
+              }
+              console.log('✅ Found user atom via REST API:', matchingAtom.term_id || matchingAtom.id)
               return matchingAtom
             }
           }
@@ -770,29 +785,80 @@ export class IntuitionClient {
         console.warn('⚠️ REST API fallback failed:', restError)
       }
 
-      // Strategy 5: Diagnostic - Query recent atoms to see what's in the system
+      // Strategy 5: Diagnostic - Query recent atoms and filter by creator_id
       console.log('📡 Strategy 5: Running diagnostic query...')
       try {
         const diagnosticQuery = `
           query DiagnosticQuery {
-            atoms(limit: 10, order_by: { created_at: desc }) {
-              id
+            atoms(limit: 50, order_by: { created_at: desc }) {
               term_id
               type
+              label
+              image
+              emoji
               creator_id
               data
+              created_at
             }
           }
         `
         const diagnosticData = await this.graphqlQuery(diagnosticQuery)
         console.log('📊 Diagnostic: Found', diagnosticData?.atoms?.length || 0, 'recent atoms')
+        
         if (diagnosticData?.atoms?.length > 0) {
-          console.log('   Sample atoms:', diagnosticData.atoms.slice(0, 3).map((a: any) => ({
-            id: a.id?.substring(0, 20),
-            type: a.type,
-            creator_id: a.creator_id?.substring(0, 20),
-            has_data: !!a.data
-          })))
+          // Filter by creator_id
+          const myAtoms = diagnosticData.atoms.filter((atom: any) => {
+            return atom.creator_id?.toLowerCase() === addr
+          })
+          
+          console.log('📊 Diagnostic: Found', myAtoms.length, 'atoms created by', addr.substring(0, 10) + '...')
+          
+          if (myAtoms.length > 0) {
+            // Process atoms to find the best match
+            const processedAtoms = myAtoms.map((atom: any) => {
+              let parsedData: any = {}
+              try {
+                if (typeof atom.data === 'string') {
+                  parsedData = JSON.parse(atom.data)
+                } else if (atom.data && typeof atom.data === 'object') {
+                  parsedData = atom.data
+                }
+              } catch {}
+              
+              // Set type from data if not set
+              if (!atom.type && parsedData.type) {
+                atom.type = parsedData.type
+              } else if (!atom.type && (parsedData.address || parsedData.wallet)) {
+                atom.type = 'User'
+              }
+              
+              atom.data = parsedData
+              return atom
+            })
+            
+            // Find User type atom or atom with address match
+            let matchingAtom = processedAtoms.find((atom: any) => {
+              return atom.type === 'User' || atom.data?.type === 'User'
+            })
+            
+            if (!matchingAtom) {
+              matchingAtom = processedAtoms.find((atom: any) => {
+                return atom.data?.address?.toLowerCase() === addr || atom.data?.wallet?.toLowerCase() === addr
+              })
+            }
+            
+            if (!matchingAtom && processedAtoms.length > 0) {
+              matchingAtom = processedAtoms[0]
+            }
+            
+            if (matchingAtom) {
+              if (!matchingAtom.id && matchingAtom.term_id) {
+                matchingAtom.id = matchingAtom.term_id
+              }
+              console.log('✅✅✅ Found user atom via diagnostic query!', matchingAtom.term_id?.substring(0, 30))
+              return matchingAtom as Atom
+            }
+          }
         }
       } catch (diagError) {
         console.warn('⚠️ Diagnostic query failed:', diagError)

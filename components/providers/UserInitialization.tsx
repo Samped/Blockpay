@@ -106,6 +106,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
   const [mounted, setMounted] = useState(false)
 
   const initializedAddressRef = useRef<string | null>(null)
+  const fetchAccountInfoRef = useRef<(() => Promise<void>) | null>(null)
 
   // Account information state
   const [accountInfo, setAccountInfo] = useState<{
@@ -405,7 +406,6 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
               order_by: { created_at: desc }
               limit: 100
             ) {
-              id
               term_id
               label
               emoji
@@ -431,7 +431,6 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
               limit: $limit
               order_by: { created_at: desc }
             ) {
-              id
               term_id
               label
               emoji
@@ -563,11 +562,19 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
           return atom
         })
         
+        // Set id from term_id for all atoms (for compatibility)
+        atoms = atoms.map((atom: any) => {
+          if (!atom.id && atom.term_id) {
+            atom.id = atom.term_id
+          }
+          return atom
+        })
+        
         // Log sample atoms for debugging
         if (atoms.length > 0) {
           console.log('📊 Sample account atoms (after processing):', atoms.slice(0, 3).map((a: any) => ({
-            id: a.id?.substring(0, 20),
             term_id: a.term_id?.substring(0, 20),
+            id: a.id?.substring(0, 20),
             type: a.type,
             creator_id: a.creator_id?.substring(0, 20),
             has_data: !!a.data,
@@ -626,6 +633,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         console.log('📦 Final atoms array length:', atoms.length)
         if (atoms.length > 0) {
           console.log('   First atom:', {
+            term_id: atoms[0].term_id?.substring(0, 30),
             id: atoms[0].id?.substring(0, 30),
             type: atoms[0].type,
             has_data: !!atoms[0].data,
@@ -653,7 +661,6 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
                   limit: 50
                   order_by: { created_at: desc }
                 ) {
-                  id
                   term_id
                   type
                   creator_id
@@ -686,7 +693,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
                 const matches = creatorId === myAddress
                 if (matches) {
                   console.log('   ✓ Found matching atom:', {
-                    id: atom.id?.substring(0, 30),
+                    term_id: atom.term_id?.substring(0, 30),
                     creator_id: atom.creator_id?.substring(0, 20),
                     type: atom.type
                   })
@@ -741,7 +748,6 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
                   where: { creator_id: { _eq: $address } }
                   limit: 10
                 ) {
-                  id
                   term_id
                   type
                   creator_id
@@ -766,7 +772,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
               errors: diagData.errors,
               atomsFound: diagData.data?.atoms?.length || 0,
               sampleAtoms: diagData.data?.atoms?.slice(0, 3).map((a: any) => ({
-                id: a.id?.substring(0, 30),
+                term_id: a.term_id?.substring(0, 30),
                 type: a.type,
                 creator_id: a.creator_id?.substring(0, 20),
                 has_data: !!a.data
@@ -845,7 +851,15 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       }
     }
 
+    // Store function in ref for external access
+    fetchAccountInfoRef.current = fetchAccountInfo
+    
     fetchAccountInfo()
+    
+    // Expose fetchAccountInfo for manual refresh
+    if (typeof window !== 'undefined') {
+      (window as any).refreshAccountInfo = fetchAccountInfo
+    }
   }, [address, isConnected, userAtom])
 
   // Handle transaction confirmation
@@ -1845,7 +1859,17 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       {isConnected && address && (
         <div className="fixed bottom-4 right-4 w-96 max-h-[80vh] overflow-y-auto bg-white rounded-lg shadow-xl border border-gray-200 z-[9998] p-4">
           <h3 className="text-lg font-bold text-gray-900 mb-4">Account Information</h3>
-          <AccountInfo accountInfo={accountInfo} />
+          <AccountInfo 
+            accountInfo={accountInfo} 
+            onRefresh={async () => {
+              // Trigger refresh by calling the stored function
+              if (fetchAccountInfoRef.current) {
+                await fetchAccountInfoRef.current()
+              } else if (typeof window !== 'undefined' && (window as any).refreshAccountInfo) {
+                await (window as any).refreshAccountInfo()
+              }
+            }}
+          />
         </div>
       )}
 
