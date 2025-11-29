@@ -162,11 +162,11 @@ export function TopCreatorsSection() {
   }
 
   const getTrustLevel = (score: number) => {
-    if (score >= 8000) return { level: 'Elite', color: 'bg-purple-100 text-purple-700', badge: '⭐' }
-    if (score >= 6000) return { level: 'Expert', color: 'bg-blue-100 text-blue-700', badge: '🏆' }
-    if (score >= 4000) return { level: 'Pro', color: 'bg-green-100 text-green-700', badge: '✨' }
-    if (score >= 2000) return { level: 'Rising', color: 'bg-yellow-100 text-yellow-700', badge: '📈' }
-    return { level: 'New', color: 'bg-gray-100 text-gray-700', badge: '🌱' }
+    if (score >= 8000) return { level: 'Elite', color: 'text-gray-900' }
+    if (score >= 6000) return { level: 'Expert', color: 'text-gray-900' }
+    if (score >= 4000) return { level: 'Pro', color: 'text-gray-900' }
+    if (score >= 2000) return { level: 'Rising', color: 'text-gray-900' }
+    return { level: 'New', color: 'text-gray-900' }
   }
 
   // Ensure we always have creators to display - limit to top 10
@@ -253,10 +253,8 @@ export function TopCreatorsSection() {
                         className="hover:bg-gray-50 transition-colors cursor-pointer group"
                       >
                         <td className="px-4 py-2.5 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center text-white font-bold text-xs">
-                              {index + 1}
-                            </div>
+                          <div className="text-xs font-semibold text-gray-900">
+                            {index + 1}
                           </div>
                         </td>
                         <td className="px-4 py-2.5 whitespace-nowrap">
@@ -265,8 +263,8 @@ export function TopCreatorsSection() {
                           </div>
                         </td>
                         <td className="px-4 py-2.5 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${trustInfo.color}`}>
-                            {trustInfo.badge} {trustInfo.level}
+                          <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 ${trustInfo.color}`}>
+                            {trustInfo.level}
                           </span>
                         </td>
                         <td className="px-4 py-2.5 whitespace-nowrap text-right">

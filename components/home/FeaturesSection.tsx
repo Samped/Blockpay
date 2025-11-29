@@ -42,7 +42,7 @@ export function FeaturesSection() {
     <section className="py-24 bg-gray-50">
       <div className="container">
         <div className="mx-auto max-w-3xl text-center mb-16">
-          <h2 className="text-4xl md:text-5xl font-bold mb-5 text-gray-900">
+          <h2 className="text-4xl md:text-5xl font-bold mb-5 text-gray-900 whitespace-nowrap">
             Built for Creators, Powered by Trust
           </h2>
           <p className="text-xl text-gray-600 font-light">

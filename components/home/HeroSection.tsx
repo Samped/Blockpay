@@ -50,7 +50,11 @@ export function HeroSection() {
               </>
             ) : (
               <button
-                onClick={() => setIsWalletModalOpen(true)}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  setIsWalletModalOpen(true)
+                }}
                 className="px-10 py-4 text-base font-semibold rounded-full bg-primary text-white hover:bg-[#0052CC] transition-all duration-200 shadow-card hover:shadow-card-hover"
               >
                 Connect Wallet to Get Started

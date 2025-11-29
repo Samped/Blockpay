@@ -18,11 +18,6 @@ export function Header() {
     }
   }, [isConnected])
 
-  // Debug
-  useEffect(() => {
-    console.log('Header - Wallet modal state:', isWalletModalOpen)
-  }, [isWalletModalOpen])
-
   return (
     <header className="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-md border-b border-gray-100">
       <div className="container flex h-20 items-center justify-between">
@@ -40,14 +35,22 @@ export function Header() {
           <Link href="/portfolio" className="text-sm font-medium text-gray-700 hover:text-primary transition-colors">
             Portfolio
           </Link>
+          {isConnected && (
+            <Link href="/dashboard" className="text-sm font-medium text-gray-700 hover:text-primary transition-colors">
+              Dashboard
+            </Link>
+          )}
         </nav>
 
         <div className="flex items-center space-x-3">
           {isConnected ? (
             <>
-              <span className="text-sm text-gray-600 font-medium px-3 py-1.5 bg-gray-50 rounded-full">
+              <Link
+                href="/dashboard"
+                className="text-sm text-gray-600 font-medium px-3 py-1.5 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors"
+              >
                 {address?.slice(0, 6)}...{address?.slice(-4)}
-              </span>
+              </Link>
               <button
                 onClick={() => disconnect()}
                 className="px-5 py-2 text-sm font-medium rounded-full bg-gray-900 text-white hover:bg-gray-800 transition-all duration-200"
@@ -58,18 +61,8 @@ export function Header() {
           ) : (
             <button
               type="button"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                alert('Button clicked! Opening modal...')
-                console.log('Button clicked! Current state:', isWalletModalOpen)
-                setIsWalletModalOpen(true)
-                console.log('Setting modal to true')
-                setTimeout(() => {
-                  console.log('State after update:', isWalletModalOpen)
-                }, 100)
-              }}
-              className="px-6 py-2.5 text-sm font-semibold rounded-full bg-primary text-white hover:bg-[#0052CC] transition-all duration-200 shadow-soft cursor-pointer"
+              onClick={() => setIsWalletModalOpen(true)}
+              className="px-6 py-2.5 text-sm font-semibold rounded-full bg-primary text-white hover:bg-[#0052CC] transition-all duration-200 shadow-soft"
             >
               Connect Wallet
             </button>

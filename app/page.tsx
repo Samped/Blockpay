@@ -5,6 +5,7 @@ import { FeaturesSection } from '@/components/home/FeaturesSection'
 import { HowItWorksSection } from '@/components/home/HowItWorksSection'
 import { StatsSection } from '@/components/home/StatsSection'
 import { CTASection } from '@/components/home/CTASection'
+import { JobPoolSection } from '@/components/home/JobPoolSection'
 import { Header } from '@/components/layout/Header'
 import { Footer } from '@/components/layout/Footer'
 
@@ -15,6 +16,7 @@ export default function Home() {
       <HeroSection />
       <StatsSection />
       <FeaturesSection />
+      <JobPoolSection />
       <TopCreatorsSection />
       <HowItWorksSection />
       <CTASection />
