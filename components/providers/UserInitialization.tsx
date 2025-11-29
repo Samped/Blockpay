@@ -73,11 +73,13 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
   
 
-  const [isInitializing, setIsInitializing] = useState(false)
+  const [isInitializing, setIsInitializing] = useState(true) // Start as true to show loading state
 
   const [showModal, setShowModal] = useState(false)
 
   const [userAtom, setUserAtom] = useState<Atom | null>(null)
+  
+  const [profileCheckComplete, setProfileCheckComplete] = useState(false) // Track if profile check is done
 
   const [error, setError] = useState<string | null>(null)
 
@@ -150,7 +152,8 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       if (!isConnected || !address) {
 
         setShowModal(false)
-
+        setProfileCheckComplete(false)
+        setIsInitializing(false)
         initializedAddressRef.current = null
 
         return
@@ -160,22 +163,23 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
 
       if (initializedAddressRef.current === address.toLowerCase()) {
-
+        // Already checked this address, but ensure profile check is marked complete
+        setProfileCheckComplete(true)
         return
-
       }
 
 
 
       try {
 
-        console.log('=== Checking Knowledge Graph for user ===')
+        console.log('=== Checking Knowledge Graph for user profile ===')
 
         console.log('Address:', address)
 
         setIsInitializing(true)
-
+        setProfileCheckComplete(false) // Mark as not complete yet
         setError(null)
+        setShowModal(false) // Don't show modal until check is complete
 
 
 
@@ -239,8 +243,6 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
               data
 
-              vault_id
-
               creator_id
 
               created_at
@@ -281,9 +283,11 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
           setUserAtom(null)
 
-          setShowModal(true)
-
+          // Only show modal after check is complete
+          setProfileCheckComplete(true)
           setIsInitializing(false)
+          // Don't auto-show modal on error - let user manually trigger it
+          setShowModal(false)
 
           return
 
@@ -297,7 +301,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
         if (existingAtom) {
 
-          console.log('✓ User atom exists:', existingAtom.id)
+          console.log('✓ User atom exists:', existingAtom.term_id || existingAtom.id)
 
           setUserAtom(existingAtom)
 
@@ -331,25 +335,25 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
           
 
-          console.log('✓ Profile exists - user can update via dashboard')
+          console.log('✅ Profile exists - showing welcome message')
 
-          // DO NOT show modal if profile already exists
-          // User can update profile from dashboard instead
+          // Profile exists - DO NOT show modal
           setShowModal(false)
-
+          setProfileCheckComplete(true)
           initializedAddressRef.current = address.toLowerCase()
 
         } else {
 
           console.log('✗ No user atom found')
 
-          console.log('✓ User needs to create profile (modal will show when requested)')
+          console.log('✓ User needs to create profile - will show creation form')
 
           setUserAtom(null)
 
-          // DO NOT auto-show modal - let user navigate to dashboard and click "Create Profile"
-          // Modal will be shown when user explicitly requests it via dashboard button
-          setShowModal(false)
+          // Mark check as complete, then show modal
+          setProfileCheckComplete(true)
+          // Auto-show modal ONLY after check confirms no profile exists
+          setShowModal(true)
 
         }
 
@@ -363,13 +367,15 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
         console.error('Error checking user:', err)
 
-        setError('Could not check existing profile.')
+        setError('Could not check existing profile. You can still create one.')
 
         setUserAtom(null)
 
-        setShowModal(true)
-
+        // Mark check as complete even on error
+        setProfileCheckComplete(true)
         setIsInitializing(false)
+        // Don't auto-show modal on error - let user manually trigger it from dashboard
+        setShowModal(false)
 
       }
 
@@ -1569,7 +1575,8 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
 
 
-  const modalContent = showModal && isConnected && (
+  // Only show modal if profile check is complete AND no profile exists
+  const modalContent = showModal && isConnected && profileCheckComplete && !userAtom && (
 
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
 
@@ -1852,8 +1859,45 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
   return (
 
     <>
-
       {children}
+
+      {/* Welcome Banner - Show when profile exists */}
+      {isConnected && address && userAtom && (() => {
+        try {
+          const atomData = typeof userAtom.data === 'string' 
+            ? JSON.parse(userAtom.data) 
+            : (userAtom.data || {})
+          const userName = atomData.name || (userAtom as any).label || 'User'
+          return userName ? (
+            <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[9997] max-w-md w-full mx-4" data-welcome-banner>
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg shadow-lg p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                    <span className="text-xl">👋</span>
+                  </div>
+                  <div>
+                    <p className="font-semibold">Welcome back, {userName}!</p>
+                    <p className="text-sm text-blue-100">Your profile is ready</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    const banner = document.querySelector('[data-welcome-banner]')
+                    if (banner) banner.remove()
+                  }}
+                  className="text-white/80 hover:text-white transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ) : null
+        } catch {
+          return null
+        }
+      })()}
 
       {/* Display Account Information */}
       {isConnected && address && (
@@ -1862,7 +1906,6 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
           <AccountInfo 
             accountInfo={accountInfo} 
             onRefresh={async () => {
-              // Trigger refresh by calling the stored function
               if (fetchAccountInfoRef.current) {
                 await fetchAccountInfoRef.current()
               } else if (typeof window !== 'undefined' && (window as any).refreshAccountInfo) {
@@ -1874,13 +1917,9 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       )}
 
       {mounted && typeof window !== 'undefined' && document.body
-
         ? createPortal(modalContent, document.body)
-
         : modalContent}
-
     </>
-
   )
 
 }
