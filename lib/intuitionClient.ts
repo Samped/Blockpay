@@ -463,11 +463,11 @@ export class IntuitionClient {
           // Try to fetch these atoms by term_id
           for (const termId of contractAtomIds) {
             try {
-              const query = `
+      const query = `
                 query GetAtomByTermId($termId: String!) {
                   atoms(where: { term_id: { _eq: $termId } }, limit: 1) {
                     term_id
-                    type
+            type
                     label
                     image
                     emoji
@@ -475,9 +475,9 @@ export class IntuitionClient {
                     creator_id
                     created_at
                     vault_id
-                  }
-                }
-              `
+          }
+        }
+      `
               const data = await this.graphqlQuery(query, { termId })
               if (data?.atoms?.[0]) {
                 console.log('✓ Found atom by term_id from contract:', data.atoms[0].id)
@@ -575,7 +575,7 @@ export class IntuitionClient {
           // If no User type, try to find by address in data
           if (!userAtom) {
             userAtom = processedAtoms.find((atom: any) => {
-              const atomData = atom.data || {}
+          const atomData = atom.data || {}
               return (
                 atomData.address?.toLowerCase() === addr ||
                 atomData.wallet?.toLowerCase() === addr
@@ -653,9 +653,9 @@ export class IntuitionClient {
           const matchingAtom = data2.atoms.find((atom: any) => {
             try {
               const atomData = typeof atom.data === 'string' ? JSON.parse(atom.data) : (atom.data || {})
-              return (
-                atomData.address?.toLowerCase() === addr ||
-                atomData.wallet?.toLowerCase() === addr ||
+          return (
+            atomData.address?.toLowerCase() === addr ||
+            atomData.wallet?.toLowerCase() === addr ||
                 atom.creator_id?.toLowerCase() === addr
               )
             } catch {
@@ -735,8 +735,8 @@ export class IntuitionClient {
             console.log('⚠️ No User type or address match found, using most recent atom')
             matchingAtom = data3.atoms[0]
           }
-          
-          if (matchingAtom) {
+
+        if (matchingAtom) {
             // Use term_id as the id field
             if (!matchingAtom.id && matchingAtom.term_id) {
               matchingAtom.id = matchingAtom.term_id
@@ -1048,7 +1048,7 @@ export class IntuitionClient {
       // Fetch completed jobs count (non-blocking)
       let completedJobs = 0
       try {
-        const completedJobsTriples = await this.getTriples(userAtom.id, 'completed_job_for')
+      const completedJobsTriples = await this.getTriples(userAtom.id, 'completed_job_for')
         completedJobs = completedJobsTriples.length
       } catch (e) {
         console.warn('Could not fetch completed jobs:', e)
@@ -1057,7 +1057,7 @@ export class IntuitionClient {
       // Fetch created artworks count (non-blocking)
       let createdArtworks = 0
       try {
-        const createdArtworksTriples = await this.getTriples(userAtom.id, 'created')
+      const createdArtworksTriples = await this.getTriples(userAtom.id, 'created')
         createdArtworks = createdArtworksTriples.length
       } catch (e) {
         console.warn('Could not fetch created artworks:', e)

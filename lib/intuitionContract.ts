@@ -95,6 +95,21 @@ export const INTUITION_CONTRACT_ABI = [
     type: 'error',
     inputs: [],
   },
+  {
+    name: 'DuplicateAtom',
+    type: 'error',
+    inputs: [],
+  },
+  {
+    name: 'AtomAlreadyExists',
+    type: 'error',
+    inputs: [],
+  },
+  {
+    name: 'InvalidAtomData',
+    type: 'error',
+    inputs: [],
+  },
   // Read function to get minimum deposit
   {
     name: 'getMinAtomDeposit',

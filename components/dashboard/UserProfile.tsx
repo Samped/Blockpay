@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { usePublicClient } from 'wagmi'
+import { usePublicClient, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
+import { parseEther, decodeErrorResult } from 'viem'
 import { intuitionClient, Atom, TrustScore, Triple } from '@/lib/intuitionClient'
+import { INTUITION_CONTRACT_ABI, INTUITION_CONTRACT_ADDRESS, atomDataToBytes } from '@/lib/intuitionContract'
 
 interface UserProfileProps {
   address: string
@@ -27,6 +29,10 @@ interface UserData {
 
 export function UserProfile({ address }: UserProfileProps) {
   const publicClient = usePublicClient()
+  const { isConnected, chain } = useAccount()
+  const { writeContract, data: hash, isPending: isWriting, error: writeError } = useWriteContract()
+  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash })
+  
   const [userData, setUserData] = useState<UserData>({
     atom: null,
     trustScore: null,
@@ -40,6 +46,8 @@ export function UserProfile({ address }: UserProfileProps) {
   })
   const [loading, setLoading] = useState(true)
   const [isEditing, setIsEditing] = useState(false)
+  const [showSuccessToast, setShowSuccessToast] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
   const [editForm, setEditForm] = useState({
     name: '',
     bio: '',
@@ -399,13 +407,31 @@ export function UserProfile({ address }: UserProfileProps) {
       console.error('Cannot save: No atom ID or term_id found')
       return
     }
+
+    if (!isConnected || !address) {
+      console.error('❌ Wallet not connected:', { isConnected, address })
+      alert('Please connect your wallet to update your profile')
+      return
+    }
+
+    if (chain?.id !== 13579) {
+      alert('Please switch to Intuition Testnet (Chain ID: 13579) to update your profile')
+      return
+    }
     
-    console.log('💾 Saving profile with atom ID:', atomId)
+    console.log('💾 Updating profile on-chain with atom ID:', atomId)
+    console.log('✅ Wallet connected:', { isConnected, address, chainId: chain?.id })
 
     try {
-      // Update atom data via GraphQL
+      setLoading(true)
+
+      // Prepare updated profile data - add unique identifier to avoid duplicate detection
+      // The contract might reject duplicate atoms, so we add a version/timestamp
+      const timestamp = Date.now()
       const updatedData = {
-        ...(userData.atom.data || {}),
+        address: address.toLowerCase(),
+        wallet: address.toLowerCase(),
+        type: 'User',
         name: editForm.name,
         bio: editForm.bio,
         email: editForm.email,
@@ -414,68 +440,366 @@ export function UserProfile({ address }: UserProfileProps) {
         github: editForm.github,
         behance: editForm.behance,
         dribbble: editForm.dribbble,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
+        version: timestamp, // Add unique version to prevent duplicate detection
+        revision: timestamp, // Additional unique field
+        // Don't preserve old createdAt to avoid conflicts
       }
 
-      const mutation = `
-        mutation UpdateAtom($term_id: String!, $data: jsonb!) {
-          update_atoms(
-            where: { term_id: { _eq: $term_id } }
-            _set: { data: $data }
-          ) {
-            affected_rows
-            returning {
-              term_id
-              data
+      // Convert atom data to bytes for createAtoms function
+      const atomDataBytes = atomDataToBytes(updatedData)
+
+      // First, try to read the actual minimum deposit from the contract - EXACTLY like UserInitialization.tsx
+      let minimumDeposit = parseEther('0.01') // Default to 0.01 tTRUST (minimum on testnet)
+      
+      if (publicClient) {
+        try {
+          console.log('📋 Reading minimum deposit from contract...')
+          // Try to read getMinAtomDeposit
+          const minDeposit = await publicClient.readContract({
+            address: INTUITION_CONTRACT_ADDRESS,
+            abi: INTUITION_CONTRACT_ABI,
+            functionName: 'getMinAtomDeposit',
+          }) as bigint | undefined
+          
+          if (minDeposit && minDeposit > 0n) {
+            minimumDeposit = minDeposit
+            console.log('✓ Minimum deposit from contract:', minimumDeposit.toString(), 'wei')
+            console.log('  (', (Number(minimumDeposit) / 1e18).toFixed(6), 'tTRUST)')
+          } else {
+            console.warn('⚠️ Could not read minimum deposit, using default 0.01 tTRUST')
+          }
+        } catch (configError: any) {
+          console.warn('⚠️ Could not read minimum deposit from contract, using default 0.01 tTRUST:', configError.message)
+        }
+      }
+
+      // IMPORTANT: Based on contract docs, msg.value MUST equal sum(assets[])
+      // The minimum deposit on testnet is 0.01 tTRUST (not 0.001!)
+      // Use the minimum deposit amount - EXACTLY like UserInitialization.tsx
+      const assetDeposit = minimumDeposit
+      const totalValue = assetDeposit // msg.value must equal sum(assets[])
+      
+      console.log('💡 Using deposit amount:', assetDeposit.toString(), 'wei')
+      console.log('   (', (Number(assetDeposit) / 1e18).toFixed(6), 'tTRUST)')
+
+      console.log('=== Updating profile atom on-chain ===')
+      console.log('Contract:', INTUITION_CONTRACT_ADDRESS)
+      console.log('Function: createAtoms(bytes[] data, uint256[] assets) payable')
+      console.log('Atom data (bytes):', atomDataBytes.substring(0, 100) + '...')
+      console.log('Minimum deposit:', minimumDeposit.toString(), 'wei')
+      console.log('Total in assets[]:', assetDeposit.toString(), 'wei')
+      console.log('Total msg.value:', totalValue.toString(), 'wei')
+      console.log('Total msg.value (tTRUST):', (Number(totalValue) / 1e18).toFixed(6))
+      console.log('⚠️ NOTE: assets[] = [minimumDeposit], msg.value = sum(assets[])')
+
+      // Prepare function arguments - EXACTLY like UserInitialization.tsx
+      // assets[] contains only the deposit, msg.value contains fee + deposit
+      const functionArgs: [`0x${string}`[], bigint[]] = [
+        [atomDataBytes], // bytes[] - array with one atom data
+        [assetDeposit]   // uint256[] - array with deposit amount (NOT including fee)
+      ]
+
+      // Simulate transaction first to catch errors - EXACTLY like UserInitialization.tsx
+      if (publicClient && address) {
+        try {
+          console.log('🔍 Simulating transaction to check for errors...')
+          const simulation = await publicClient.simulateContract({
+            account: address as `0x${string}`,
+            address: INTUITION_CONTRACT_ADDRESS,
+            abi: INTUITION_CONTRACT_ABI,
+            functionName: 'createAtoms',
+            args: functionArgs,
+            value: totalValue // msg.value = sum(assets[])
+          })
+          console.log('✅ Simulation successful - transaction should work')
+          console.log('Simulation result:', simulation)
+        } catch (simError: any) {
+          console.error('❌ Simulation failed - transaction will revert!')
+          console.error('Full error:', simError)
+          console.error('Error cause:', simError?.cause)
+          console.error('Error data:', simError?.cause?.data)
+          console.error('Error signature:', simError?.cause?.data?.errorName || 'Unknown')
+          
+          // Try to decode the error - EXACTLY like UserInitialization.tsx
+          let errorMessage = 'Transaction will revert'
+          try {
+            // Try to decode using the ABI
+            if (simError?.cause?.data && typeof simError.cause.data === 'string') {
+              const decoded = decodeErrorResult({
+                data: simError.cause.data as `0x${string}`,
+                abi: INTUITION_CONTRACT_ABI,
+              })
+              if (decoded) {
+                errorMessage = `Contract error: ${decoded.errorName || 'Unknown error'}`
+                console.log('Decoded error:', decoded)
+              }
+            }
+          } catch (decodeError) {
+            console.warn('Could not decode error:', decodeError)
+          }
+          
+          // Extract revert reason from various error formats - EXACTLY like UserInitialization.tsx
+          if (!errorMessage || errorMessage === 'Transaction will revert') {
+            if (simError?.cause?.data?.message) {
+              errorMessage = simError.cause.data.message
+            } else if (simError?.shortMessage) {
+              errorMessage = simError.shortMessage
+            } else if (simError?.message) {
+              errorMessage = simError.message
             }
           }
-        }
-      `
+          
+          // Check for error signature 0xb4856ebc first
+          const errorSig = simError?.cause?.data && typeof simError.cause.data === 'string' 
+            ? simError.cause.data.substring(0, 10) 
+            : ''
+          
+          if (errorSig === '0xb4856ebc') {
+            // This error suggests the contract is rejecting duplicate atoms
+            // Since atoms are immutable, we should update via GraphQL instead
+            console.error('⚠️ Error 0xb4856ebc - contract rejecting duplicate atom creation')
+            console.log('💡 Falling back to GraphQL update instead of on-chain creation')
+            
+            // Fall back to GraphQL update
+            setLoading(false)
+            try {
+              const atomId = userData.atom?.term_id || userData.atom?.id
+              if (atomId) {
+                const updatedData = {
+                  ...(userData.atom?.data || {}),
+                  name: editForm.name,
+                  bio: editForm.bio,
+                  email: editForm.email,
+                  website: editForm.website,
+                  twitter: editForm.twitter,
+                  github: editForm.github,
+                  behance: editForm.behance,
+                  dribbble: editForm.dribbble,
+                  updatedAt: new Date().toISOString()
+                }
 
-      const response = await fetch('https://testnet.intuition.sh/v1/graphql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: mutation,
-          variables: {
-            term_id: atomId,
-            data: updatedData
+                const mutation = `
+                  mutation UpdateAtom($term_id: String!, $data: jsonb!) {
+                    update_atoms(
+                      where: { term_id: { _eq: $term_id } }
+                      _set: { data: $data }
+                    ) {
+                      affected_rows
+                      returning {
+                        term_id
+                        data
+                      }
+                    }
+                  }
+                `
+
+                const response = await fetch('https://testnet.intuition.sh/v1/graphql', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    query: mutation,
+                    variables: {
+                      term_id: atomId,
+                      data: updatedData
+                    }
+                  })
+                })
+
+                const result = await response.json()
+                if (result.errors) {
+                  throw new Error(result.errors[0].message)
+                }
+
+                // Update local state
+                setUserData({
+                  ...userData,
+                  name: editForm.name,
+                  bio: editForm.bio,
+                  email: editForm.email,
+                  website: editForm.website,
+                  socialLinks: {
+                    twitter: editForm.twitter,
+                    github: editForm.github,
+                    behance: editForm.behance,
+                    dribbble: editForm.dribbble,
+                  },
+                  atom: {
+                    ...userData.atom,
+                    data: updatedData
+                  }
+                })
+
+                setIsEditing(false)
+                setSuccessMessage('Profile updated successfully via GraphQL! (On-chain creation was rejected - likely duplicate atom)')
+                setShowSuccessToast(true)
+                return
+              }
+            } catch (graphqlError: any) {
+              errorMessage = `Failed to update via GraphQL: ${graphqlError.message || 'Unknown error'}. The contract rejected creating a new atom (error: 0xb4856ebc), likely because a User atom already exists for this address.`
+            }
+          } else if (errorMessage.includes('InvalidDepositAmount') || errorMessage.includes('InvalidDeposit')) {
+            errorMessage = `Invalid deposit amount. The minimum required deposit is ${(Number(minimumDeposit) / 1e18).toFixed(6)} tTRUST, but you provided ${(Number(assetDeposit) / 1e18).toFixed(6)} tTRUST. Please ensure you have at least ${(Number(minimumDeposit) / 1e18).toFixed(6)} tTRUST + gas fees in your wallet.`
+          } else if (errorMessage.includes('insufficient') || errorMessage.includes('balance') || errorMessage.includes('funds')) {
+            errorMessage = `Insufficient tTRUST balance. You need at least ${(Number(totalValue) / 1e18).toFixed(6)} tTRUST + gas fees.`
+          } else if (errorMessage.includes('value') || errorMessage.includes('msg.value')) {
+            errorMessage = `Value mismatch: msg.value must equal sum(assets[]). Expected: ${(Number(totalValue) / 1e18).toFixed(6)} tTRUST (deposit: ${(Number(assetDeposit) / 1e18).toFixed(6)}).`
+          } else if (errorMessage.includes('length') || errorMessage.includes('array')) {
+            errorMessage = 'Array length mismatch: data and assets arrays must have the same length.'
+          } else if (errorMessage.includes('minimum') || errorMessage.includes('deposit')) {
+            errorMessage = `Minimum deposit not met. Required: ${(Number(minimumDeposit) / 1e18).toFixed(6)} tTRUST, you provided: ${(Number(assetDeposit) / 1e18).toFixed(6)} tTRUST.`
           }
-        })
-      })
-
-      const result = await response.json()
-
-      if (result.errors) {
-        throw new Error(result.errors[0].message)
+          
+          setLoading(false)
+          alert(`⚠️ ${errorMessage}. Check browser console (F12) for full details.`)
+          return
+        }
       }
 
-      // Update local state
-      setUserData({
-        ...userData,
-        name: editForm.name,
-        bio: editForm.bio,
-        email: editForm.email,
-        website: editForm.website,
-        socialLinks: {
-          twitter: editForm.twitter,
-          github: editForm.github,
-          behance: editForm.behance,
-          dribbble: editForm.dribbble,
-        },
-        atom: {
-          ...userData.atom,
-          data: updatedData
-        }
+      // Call contract's createAtoms function - EXACTLY like UserInitialization.tsx
+      // Function signature: createAtoms(bytes[] calldata data, uint256[] calldata assets) payable
+      // msg.value MUST equal sum(assets[])
+      writeContract({
+        address: INTUITION_CONTRACT_ADDRESS,
+        abi: INTUITION_CONTRACT_ABI,
+        functionName: 'createAtoms',
+        args: functionArgs,
+        value: totalValue // msg.value = sum(assets[])
       })
 
-      setIsEditing(false)
-      console.log('✓ Profile updated successfully')
-    } catch (error) {
-      console.error('Error saving profile:', error)
-      alert('Failed to save profile. Please try again.')
+      console.log('✓ Transaction request sent to wallet')
+      // Note: Transaction confirmation and GraphQL update will be handled in useEffect below
+    } catch (error: any) {
+      console.error('Error updating profile:', error)
+      setLoading(false)
+      alert(`Failed to update profile: ${error.message || 'Unknown error'}`)
     }
   }
+
+  // Handle transaction confirmation and update GraphQL
+  useEffect(() => {
+    if (isConfirmed && hash) {
+      console.log('✅ Profile update transaction confirmed! Tx:', hash)
+      
+      const updateAfterConfirmation = async () => {
+        try {
+          // Wait a bit for GraphQL indexing
+          await new Promise(resolve => setTimeout(resolve, 3000))
+
+          // Update GraphQL with the new data (optional - for faster UI updates)
+          const atomId = userData.atom?.term_id || userData.atom?.id
+          if (atomId) {
+            const updatedData = {
+              ...(userData.atom.data || {}),
+              name: editForm.name,
+              bio: editForm.bio,
+              email: editForm.email,
+              website: editForm.website,
+              twitter: editForm.twitter,
+              github: editForm.github,
+              behance: editForm.behance,
+              dribbble: editForm.dribbble,
+              updatedAt: new Date().toISOString()
+            }
+
+            try {
+              const mutation = `
+                mutation UpdateAtom($term_id: String!, $data: jsonb!) {
+                  update_atoms(
+                    where: { term_id: { _eq: $term_id } }
+                    _set: { data: $data }
+                  ) {
+                    affected_rows
+                    returning {
+                      term_id
+                      data
+                    }
+                  }
+                }
+              `
+
+              const response = await fetch('https://testnet.intuition.sh/v1/graphql', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  query: mutation,
+                  variables: {
+                    term_id: atomId,
+                    data: updatedData
+                  }
+                })
+              })
+
+              const result = await response.json()
+              if (result.errors) {
+                console.warn('GraphQL update failed, but on-chain update succeeded:', result.errors)
+              }
+            } catch (graphqlError) {
+              console.warn('Could not update GraphQL, but on-chain update succeeded:', graphqlError)
+            }
+          }
+
+          // Update local state
+          setUserData({
+            ...userData,
+            name: editForm.name,
+            bio: editForm.bio,
+            email: editForm.email,
+            website: editForm.website,
+            socialLinks: {
+              twitter: editForm.twitter,
+              github: editForm.github,
+              behance: editForm.behance,
+              dribbble: editForm.dribbble,
+            },
+            atom: {
+              ...userData.atom,
+              data: {
+                ...(userData.atom?.data || {}),
+                name: editForm.name,
+                bio: editForm.bio,
+                email: editForm.email,
+                website: editForm.website,
+                twitter: editForm.twitter,
+                github: editForm.github,
+                behance: editForm.behance,
+                dribbble: editForm.dribbble,
+                updatedAt: new Date().toISOString()
+              }
+            }
+          })
+
+          setIsEditing(false)
+          setLoading(false)
+          console.log('✅ Profile updated successfully on-chain!')
+          setSuccessMessage(`Profile updated successfully! Transaction: ${hash.substring(0, 10)}...${hash.substring(hash.length - 8)}`)
+          setShowSuccessToast(true)
+        } catch (error) {
+          console.error('Error in post-confirmation update:', error)
+          setLoading(false)
+        }
+      }
+
+      updateAfterConfirmation()
+    }
+  }, [isConfirmed, hash, editForm, userData])
+
+  // Handle transaction errors
+  useEffect(() => {
+    if (writeError) {
+      console.error('Transaction error:', writeError)
+      setLoading(false)
+      let errorMessage = 'Transaction failed: '
+      if (writeError.message?.includes('user rejected')) {
+        errorMessage = 'Transaction was cancelled.'
+      } else if (writeError.message?.includes('insufficient funds')) {
+        errorMessage = 'Insufficient tTRUST for deposit + gas fees.'
+      } else {
+        errorMessage += writeError.message || 'Unknown error'
+      }
+      alert(errorMessage)
+    }
+  }, [writeError])
 
   const getTrustLevel = (score: number | null) => {
     if (!score) return { level: 'New', color: 'bg-gray-100 text-gray-900' }
@@ -554,7 +878,45 @@ export function UserProfile({ address }: UserProfileProps) {
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-card p-6">
+    <>
+      {/* Success Toast Notification */}
+      {showSuccessToast && (
+        <div
+          onClick={() => setShowSuccessToast(false)}
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg shadow-2xl p-6 min-w-[320px] max-w-md border border-green-400/30 cursor-default animate-in slide-in-from-top-5"
+          >
+            <div className="flex items-start gap-4">
+              <div className="flex-shrink-0 mt-0.5">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="font-semibold text-lg mb-2">Success!</p>
+                <p className="text-sm text-green-50 mb-4">{successMessage}</p>
+                <p className="text-xs text-green-200 opacity-80">Click anywhere outside to dismiss</p>
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowSuccessToast(false)
+                }}
+                className="flex-shrink-0 text-white/80 hover:text-white transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl shadow-card p-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold text-gray-900">Profile Information</h2>
         <div className="flex items-center gap-2">
@@ -594,9 +956,10 @@ export function UserProfile({ address }: UserProfileProps) {
             </button>
             <button
               onClick={handleSave}
-              className="px-4 py-2 text-sm font-medium rounded-full bg-primary text-white hover:bg-[#0052CC] transition-colors"
+              disabled={isWriting || isConfirming || loading}
+              className="px-4 py-2 text-sm font-medium rounded-full bg-primary text-white hover:bg-[#0052CC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Save Changes
+              {isWriting || isConfirming ? 'Processing...' : 'Save Changes'}
             </button>
           </div>
           )}
@@ -848,6 +1211,7 @@ export function UserProfile({ address }: UserProfileProps) {
         </div>
       </div>
     </div>
+    </>
   )
 }
 
