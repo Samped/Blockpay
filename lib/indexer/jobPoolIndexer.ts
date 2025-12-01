@@ -11,8 +11,8 @@ import { createPublicClient, http, parseAbiItem } from 'viem'
 import { intuitionClient } from '../intuitionClient'
 
 // Configuration
-const RPC_URL = process.env.RPC_URL || 'https://rpc.testnet.intuition.sh'
-const JOB_POOL_ADDRESS = process.env.JOB_POOL_ADDRESS as `0x${string}`
+const RPC_URL = process.env.RPC_URL || 'https://testnet.rpc.intuition.systems/http'
+const JOB_POOL_ADDRESS = (process.env.JOB_POOL_ADDRESS || '0x8A21eAa3271d546471435804F2a1c90b80BD7B95') as `0x${string}`
 const CHAIN_ID = parseInt(process.env.CHAIN_ID || '13579') // Intuition Testnet
 
 // Create public client
@@ -89,19 +89,18 @@ async function createTriple(
 async function handleJobCreated(
   jobId: bigint,
   creator: `0x${string}`,
-  budget: bigint,
-  deadline: bigint,
-  feeBps: bigint
+  payment: bigint,
+  deadline: bigint
 ) {
   console.log(
-    `[JobCreated] Job #${jobId} by ${creator}, budget: ${budget.toString()}, deadline: ${deadline.toString()}, feeBps: ${feeBps.toString()}`
+    `[JobCreated] Job #${jobId} by ${creator}, payment: ${payment.toString()}, deadline: ${deadline.toString()}`
   )
 
   try {
     // Find creator's profile atom
     const creatorProfile = await findOrCreateProfileAtom(creator.toLowerCase())
 
-    // NOTE: SecureJobPool no longer emits a jobAtom bytes32, so we can't directly
+    // NOTE: The new JobPool contract doesn't emit a jobAtom bytes32, so we can't directly
     // link to a specific Job Atom here. You can extend this by:
     // - keeping an off-chain mapping jobId -> jobAtom, or
     // - deriving the atom from IPFS metadata.
@@ -116,41 +115,40 @@ async function handleJobCreated(
 }
 
 /**
- * Handle SubmissionCreated event
+ * Handle WorkSubmitted event
  */
-async function handleSubmissionCreated(
+async function handleWorkSubmitted(
   jobId: bigint,
-  submissionId: bigint,
-  worker: `0x${string}`
+  worker: `0x${string}`,
+  submissionHash: `0x${string}`
 ) {
-  console.log(`[SubmissionCreated] Submission #${submissionId} for Job #${jobId} by ${worker}`)
+  console.log(`[WorkSubmitted] Job #${jobId} by ${worker}, hash: ${submissionHash}`)
 
   try {
     const workerProfile = await findOrCreateProfileAtom(worker.toLowerCase())
 
-    // As with jobs, SecureJobPool doesn't emit a submissionAtom. To create
-    // triples, you'll want an off-chain mapping from (jobId, submissionId)
+    // The new JobPool contract stores submissionHash as bytes32.
+    // To create triples, you'll want an off-chain mapping from jobId
     // to a Submission Atom ID.
     if (workerProfile) {
       console.log(`Worker profile atom for ${worker}: ${workerProfile}`)
     }
   } catch (error) {
-    console.error(`Error handling SubmissionCreated for submission ${submissionId}:`, error)
+    console.error(`Error handling WorkSubmitted for job ${jobId}:`, error)
   }
 }
 
 /**
- * Handle SubmissionApproved event
+ * Handle JobCompleted event
  */
-async function handleSubmissionApproved(
+async function handleJobCompleted(
   jobId: bigint,
-  submissionId: bigint,
   worker: `0x${string}`,
-  workerAmount: bigint,
-  feeAmount: bigint
+  workerPayment: bigint,
+  platformFee: bigint
 ) {
   console.log(
-    `[SubmissionApproved] Job #${jobId}, Submission #${submissionId}, Worker: ${worker}, Paid: ${workerAmount.toString()}, Fee: ${feeAmount.toString()}`
+    `[JobCompleted] Job #${jobId}, Worker: ${worker}, Payment: ${workerPayment.toString()}, Fee: ${platformFee.toString()}`
   )
 
   try {
@@ -158,13 +156,13 @@ async function handleSubmissionApproved(
 
     // Here you might:
     // - link Job Atom -> Worker profile via "completedBy"
-    // - emit trust votes based on workerAmount
-    // That requires knowing the jobAtom & submissionAtom off-chain.
+    // - emit trust votes based on workerPayment
+    // That requires knowing the jobAtom off-chain.
     if (workerProfile) {
-      console.log(`Worker profile atom for approved submission: ${workerProfile}`)
+      console.log(`Worker profile atom for completed job: ${workerProfile}`)
     }
   } catch (error) {
-    console.error(`Error handling SubmissionApproved for job ${jobId}:`, error)
+    console.error(`Error handling JobCompleted for job ${jobId}:`, error)
   }
 }
 
@@ -194,11 +192,11 @@ export async function startJobPoolIndexer(fromBlock?: bigint) {
   // Set up event listeners for new events
   console.log('👂 Listening for new events...')
 
-  // Watch for JobCreated events (SecureJobPool)
+  // Watch for JobCreated events
   publicClient.watchEvent({
     address: JOB_POOL_ADDRESS,
     event: parseAbiItem(
-      'event JobCreated(uint256 indexed jobId, address indexed creator, uint256 budget, uint256 deadline, uint16 feeBps)'
+      'event JobCreated(uint256 indexed jobId, address indexed creator, uint256 payment, uint256 deadline)'
     ),
     onLogs: (logs) => {
       for (const log of logs) {
@@ -206,9 +204,8 @@ export async function startJobPoolIndexer(fromBlock?: bigint) {
           handleJobCreated(
             log.args.jobId!,
             log.args.creator!,
-            log.args.budget!,
-            log.args.deadline!,
-            BigInt(log.args.feeBps!)
+            log.args.payment!,
+            log.args.deadline!
           )
           lastProcessedBlock = log.blockNumber
         }
@@ -216,41 +213,40 @@ export async function startJobPoolIndexer(fromBlock?: bigint) {
     },
   })
 
-  // Watch for SubmissionCreated events (SecureJobPool)
+  // Watch for WorkSubmitted events
   publicClient.watchEvent({
     address: JOB_POOL_ADDRESS,
     event: parseAbiItem(
-      'event SubmissionCreated(uint256 indexed jobId, uint256 indexed submissionId, address indexed worker)'
+      'event WorkSubmitted(uint256 indexed jobId, address indexed worker, bytes32 submissionHash)'
     ),
     onLogs: (logs) => {
       for (const log of logs) {
         if (log.blockNumber && log.blockNumber > lastProcessedBlock) {
-          handleSubmissionCreated(
+          handleWorkSubmitted(
             log.args.jobId!,
-            log.args.submissionId!,
-            log.args.worker!
-          )
-          lastProcessedBlock = log.blockNumber
-        }
-      }
-    },
-  })
-
-  // Watch for SubmissionApproved events (SecureJobPool)
-  publicClient.watchEvent({
-    address: JOB_POOL_ADDRESS,
-    event: parseAbiItem(
-      'event SubmissionApproved(uint256 indexed jobId, uint256 indexed submissionId, address indexed worker, uint256 workerAmount, uint256 feeAmount)'
-    ),
-    onLogs: (logs) => {
-      for (const log of logs) {
-        if (log.blockNumber && log.blockNumber > lastProcessedBlock) {
-          handleSubmissionApproved(
-            log.args.jobId!,
-            log.args.submissionId!,
             log.args.worker!,
-            log.args.workerAmount!,
-            log.args.feeAmount!
+            log.args.submissionHash!
+          )
+          lastProcessedBlock = log.blockNumber
+        }
+      }
+    },
+  })
+
+  // Watch for JobCompleted events
+  publicClient.watchEvent({
+    address: JOB_POOL_ADDRESS,
+    event: parseAbiItem(
+      'event JobCompleted(uint256 indexed jobId, address indexed worker, uint256 workerPayment, uint256 platformFee)'
+    ),
+    onLogs: (logs) => {
+      for (const log of logs) {
+        if (log.blockNumber && log.blockNumber > lastProcessedBlock) {
+          handleJobCompleted(
+            log.args.jobId!,
+            log.args.worker!,
+            log.args.workerPayment!,
+            log.args.platformFee!
           )
           lastProcessedBlock = log.blockNumber
         }
@@ -271,11 +267,11 @@ async function processHistoricalEvents(fromBlock: bigint, toBlock: bigint) {
     const end = start + batchSize > toBlock ? toBlock : start + batchSize
 
     try {
-      // Get JobCreated events (SecureJobPool)
+      // Get JobCreated events
       const jobCreatedLogs = await publicClient.getLogs({
         address: JOB_POOL_ADDRESS,
         event: parseAbiItem(
-          'event JobCreated(uint256 indexed jobId, address indexed creator, uint256 budget, uint256 deadline, uint16 feeBps)'
+          'event JobCreated(uint256 indexed jobId, address indexed creator, uint256 payment, uint256 deadline)'
         ),
         fromBlock: start as bigint,
         toBlock: end as bigint,
@@ -285,47 +281,45 @@ async function processHistoricalEvents(fromBlock: bigint, toBlock: bigint) {
         await handleJobCreated(
           log.args.jobId!,
           log.args.creator!,
-          log.args.budget!,
-          log.args.deadline!,
-          BigInt(log.args.feeBps!)
+          log.args.payment!,
+          log.args.deadline!
         )
       }
 
-      // Get SubmissionCreated events (SecureJobPool)
-      const submissionCreatedLogs = await publicClient.getLogs({
+      // Get WorkSubmitted events
+      const workSubmittedLogs = await publicClient.getLogs({
         address: JOB_POOL_ADDRESS,
         event: parseAbiItem(
-          'event SubmissionCreated(uint256 indexed jobId, uint256 indexed submissionId, address indexed worker)'
+          'event WorkSubmitted(uint256 indexed jobId, address indexed worker, bytes32 submissionHash)'
         ),
-        fromBlock: start,
-        toBlock: end,
+        fromBlock: start as bigint,
+        toBlock: end as bigint,
       })
 
-      for (const log of submissionCreatedLogs) {
-        await handleSubmissionCreated(
+      for (const log of workSubmittedLogs) {
+        await handleWorkSubmitted(
           log.args.jobId!,
-          log.args.submissionId!,
-          log.args.worker!
-        )
-      }
-
-      // Get SubmissionApproved events (SecureJobPool)
-      const submissionApprovedLogs = await publicClient.getLogs({
-        address: JOB_POOL_ADDRESS,
-        event: parseAbiItem(
-          'event SubmissionApproved(uint256 indexed jobId, uint256 indexed submissionId, address indexed worker, uint256 workerAmount, uint256 feeAmount)'
-        ),
-        fromBlock: start,
-        toBlock: end,
-      })
-
-      for (const log of submissionApprovedLogs) {
-        await handleSubmissionApproved(
-          log.args.jobId!,
-          log.args.submissionId!,
           log.args.worker!,
-          log.args.workerAmount!,
-          log.args.feeAmount!
+          log.args.submissionHash!
+        )
+      }
+
+      // Get JobCompleted events
+      const jobCompletedLogs = await publicClient.getLogs({
+        address: JOB_POOL_ADDRESS,
+        event: parseAbiItem(
+          'event JobCompleted(uint256 indexed jobId, address indexed worker, uint256 workerPayment, uint256 platformFee)'
+        ),
+        fromBlock: start as bigint,
+        toBlock: end as bigint,
+      })
+
+      for (const log of jobCompletedLogs) {
+        await handleJobCompleted(
+          log.args.jobId!,
+          log.args.worker!,
+          log.args.workerPayment!,
+          log.args.platformFee!
         )
       }
 

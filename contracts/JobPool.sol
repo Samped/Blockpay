@@ -1,508 +1,278 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
-contract SecureJobPool is AccessControl, Pausable, ReentrancyGuard {
-    using SafeERC20 for IERC20;
-
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
-
-    IERC20 public immutable TRUST;
-
-    uint256 public constant FEE_BASIS = 10000;
-    uint256 public constant MIN_DESCRIPTION_LENGTH = 20;
-    uint256 public constant MAX_DESCRIPTION_LENGTH = 500;
-    uint256 public constant MIN_DEADLINE_FUTURE = 1 hours;
-    uint256 public constant GRACE_PERIOD = 10 minutes; // Buffer for approvals near deadline
-
-    uint16 public platformFeeBps; // Current platform fee (for new jobs)
-    address public treasury;
-    uint256 public jobCounter;
-
-    // Configurable policies
-    bool public allowMultipleSubmissions = true;
-    uint256 public maxSubmissionsPerJob = 100;
-    uint256 public maxSubmissionsPerUserPerJob = 5;
-    uint256 public minJobBudget = 1000; // Minimum to prevent spam
-
-    // Events
-    event JobCreated(
-        uint256 indexed jobId,
-        address indexed creator,
-        uint256 budget,
-        uint256 deadline,
-        uint16 feeBps
-    );
-
-    event SubmissionCreated(
-        uint256 indexed jobId,
-        uint256 indexed submissionId,
-        address indexed worker
-    );
-
-    event SubmissionApproved(
-        uint256 indexed jobId,
-        uint256 indexed submissionId,
-        address indexed worker,
-        uint256 workerAmount,
-        uint256 feeAmount
-    );
-
-    event JobRefunded(uint256 indexed jobId, uint256 amount);
-    event JobCancelled(uint256 indexed jobId, uint256 amount);
-    event PlatformFeeUpdated(uint16 newFeeBps);
-    event TreasuryUpdated(address newTreasury);
-    event PolicyUpdated(string policy, uint256 value);
-
-    event EmergencyRecovery(
-        uint256 indexed jobId,
-        address indexed recipient,
-        uint256 amount
-    );
-
-    // Structures
-    enum JobStatus {
-        Open,
-        Approved,
-        Refunded,
-        Cancelled
-    }
-
-    struct Submission {
-        address worker;
-        bool chosen;
-        string previewCID;
-        string finalCID;
-    }
-
+/**
+ * @title JobPool
+ * @dev Escrow contract for freelance work with watermarked submissions
+ */
+contract JobPool {
+    address public platformOwner;
+    uint256 public platformFeePercent = 250; // 2.5% (basis points)
+    uint256 private constant BASIS_POINTS = 10000;
+    
+    // Reentrancy guard
+    uint256 private constant NOT_ENTERED = 1;
+    uint256 private constant ENTERED = 2;
+    uint256 private _status;
+    
+    // Emergency pause
+    bool public paused;
+    
+    enum JobStatus { Active, Completed, Cancelled, Expired }
+    
     struct Job {
         address creator;
-        uint256 budget; // Escrowed amount
-        uint256 deadline; // Unix timestamp
-        uint16 feeBps; // Fee rate locked at job creation
+        uint256 payment;
+        uint256 deadline;
         JobStatus status;
-        string description;
-        Submission[] submissions;
+        bool hasSubmission;
+        address worker;
+        bytes32 submissionHash; // IPFS hash (more gas efficient than string)
     }
-
-    mapping(uint256 => Job) private jobs;
-    mapping(uint256 => mapping(address => uint256)) public userSubmissionCount;
-
-    // Constructor
-    constructor(
-        IERC20 _trust,
-        address _treasury,
-        uint16 _platformFeeBps
-    ) {
-        require(address(_trust) != address(0), "Invalid TRUST token");
-        require(_treasury != address(0), "Invalid treasury");
-        require(_platformFeeBps <= 1000, "Fee must be <= 10%");
-
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-
-        TRUST = _trust;
-        treasury = _treasury;
-        platformFeeBps = _platformFeeBps;
+    
+    mapping(uint256 => Job) public jobs;
+    uint256 public jobCount;
+    
+    event JobCreated(uint256 indexed jobId, address indexed creator, uint256 payment, uint256 deadline);
+    event WorkSubmitted(uint256 indexed jobId, address indexed worker, bytes32 submissionHash);
+    event JobCompleted(uint256 indexed jobId, address indexed worker, uint256 workerPayment, uint256 platformFee);
+    event JobCancelled(uint256 indexed jobId, address indexed creator, uint256 refund);
+    event JobExpired(uint256 indexed jobId, address indexed creator, uint256 refund);
+    event Paused(address account);
+    event Unpaused(address account);
+    
+    modifier onlyPlatformOwner() {
+        require(msg.sender == platformOwner, "Not platform owner");
+        _;
     }
-
-    // ========================================
-    // ADMIN FUNCTIONS
-    // ========================================
-
-    function setPlatformFee(uint16 bps) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(bps <= 1000, "Fee must be <= 10%");
-        platformFeeBps = bps;
-        emit PlatformFeeUpdated(bps);
+    
+    modifier nonReentrant() {
+        require(_status != ENTERED, "ReentrancyGuard: reentrant call");
+        _status = ENTERED;
+        _;
+        _status = NOT_ENTERED;
     }
-
-    function setTreasury(address _treasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(_treasury != address(0), "Invalid treasury");
-        treasury = _treasury;
-        emit TreasuryUpdated(_treasury);
+    
+    modifier whenNotPaused() {
+        require(!paused, "Contract is paused");
+        _;
     }
-
-    function setAllowMultipleSubmissions(bool allow) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        allowMultipleSubmissions = allow;
-        emit PolicyUpdated("allowMultipleSubmissions", allow ? 1 : 0);
+    
+    modifier whenPaused() {
+        require(paused, "Contract is not paused");
+        _;
     }
-
-    function setMaxSubmissionsPerJob(uint256 max) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(max > 0 && max <= 1000, "Invalid max");
-        maxSubmissionsPerJob = max;
-        emit PolicyUpdated("maxSubmissionsPerJob", max);
+    
+    constructor() {
+        platformOwner = msg.sender;
+        _status = NOT_ENTERED;
+        paused = false;
     }
-
-    function setMaxSubmissionsPerUserPerJob(uint256 max) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(max > 0 && max <= 50, "Invalid max");
-        maxSubmissionsPerUserPerJob = max;
-        emit PolicyUpdated("maxSubmissionsPerUserPerJob", max);
+    
+    /**
+     * @dev Pause contract in emergency
+     */
+    function pause() external onlyPlatformOwner whenNotPaused {
+        paused = true;
+        emit Paused(msg.sender);
     }
-
-    function setMinJobBudget(uint256 min) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        minJobBudget = min;
-        emit PolicyUpdated("minJobBudget", min);
+    
+    /**
+     * @dev Unpause contract
+     */
+    function unpause() external onlyPlatformOwner whenPaused {
+        paused = false;
+        emit Unpaused(msg.sender);
     }
-
-    function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
-        _pause();
+    
+    /**
+     * @dev Create a new job pool with locked payment
+     * @param _deadline Unix timestamp for job deadline
+     */
+    function createJob(uint256 _deadline) external payable whenNotPaused returns (uint256) {
+        require(msg.value > 0, "Payment must be greater than 0");
+        require(_deadline > block.timestamp, "Deadline must be in future");
+        
+        jobCount++;
+        jobs[jobCount] = Job({
+            creator: msg.sender,
+            payment: msg.value,
+            deadline: _deadline,
+            status: JobStatus.Active,
+            hasSubmission: false,
+            worker: address(0),
+            submissionHash: bytes32(0)
+        });
+        
+        emit JobCreated(jobCount, msg.sender, msg.value, _deadline);
+        return jobCount;
     }
-
-    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
-        _unpause();
+    
+    /**
+     * @dev Worker submits their work (off-chain storage reference)
+     * @param _jobId The job ID
+     * @param _submissionHash IPFS hash as bytes32 (e.g., base16 CIDv0)
+     */
+    function submitWork(uint256 _jobId, bytes32 _submissionHash) external whenNotPaused {
+        Job storage job = jobs[_jobId];
+        require(_jobId > 0 && _jobId <= jobCount, "Invalid job ID");
+        require(job.status == JobStatus.Active, "Job not active");
+        require(block.timestamp <= job.deadline, "Job deadline passed");
+        require(!job.hasSubmission, "Work already submitted");
+        require(_submissionHash != bytes32(0), "Invalid submission hash");
+        require(msg.sender != job.creator, "Creator cannot submit work");
+        
+        job.hasSubmission = true;
+        job.worker = msg.sender;
+        job.submissionHash = _submissionHash;
+        
+        emit WorkSubmitted(_jobId, msg.sender, _submissionHash);
     }
-
-    // ========================================
-    // JOB CREATION
-    // ========================================
-
-    function createJob(
-        uint256 budget,
-        uint256 deadline,
-        string calldata description
-    ) external whenNotPaused nonReentrant returns (uint256) {
-        require(budget >= minJobBudget, "Budget too low");
-        require(deadline > block.timestamp + MIN_DEADLINE_FUTURE, "Deadline too soon");
-
-        bytes memory descBytes = bytes(description);
-        require(descBytes.length >= MIN_DESCRIPTION_LENGTH, "Description too short");
-        require(descBytes.length <= MAX_DESCRIPTION_LENGTH, "Description too long");
-
-        // Escrow funds
-        TRUST.safeTransferFrom(msg.sender, address(this), budget);
-
-        // Create job
-        jobCounter++;
-        uint256 jobId = jobCounter;
-
-        Job storage job = jobs[jobId];
-        job.creator = msg.sender;
-        job.budget = budget;
-        job.deadline = deadline;
-        job.feeBps = platformFeeBps;
-        job.status = JobStatus.Open;
-        job.description = description;
-
-        emit JobCreated(jobId, msg.sender, budget, deadline, platformFeeBps);
-        return jobId;
-    }
-
-    // ========================================
-    // SUBMIT WORK
-    // ========================================
-
-    function submitWork(uint256 jobId, string calldata previewCID)
-        external
-        whenNotPaused
-        nonReentrant
-    {
-        Job storage job = jobs[jobId];
-
-        require(_jobExists(jobId), "Job does not exist");
-        require(job.status == JobStatus.Open, "Job not open");
-        require(block.timestamp <= job.deadline, "Deadline passed");
-        require(_isValidCID(previewCID), "Invalid CID format");
-
-        require(job.submissions.length < maxSubmissionsPerJob, "Job submissions full");
-
-        uint256 userSubmissions = userSubmissionCount[jobId][msg.sender];
-        if (!allowMultipleSubmissions) {
-            require(userSubmissions == 0, "Only one submission allowed");
-        } else {
-            require(userSubmissions < maxSubmissionsPerUserPerJob, "User submission limit reached");
+    
+    /**
+     * @dev Creator accepts the work and releases payment to worker
+     * @param _jobId The job ID
+     */
+    function acceptWork(uint256 _jobId) external nonReentrant whenNotPaused {
+        Job storage job = jobs[_jobId];
+        require(msg.sender == job.creator, "Only creator can accept");
+        require(job.status == JobStatus.Active, "Job not active");
+        require(job.hasSubmission, "No submission to accept");
+        
+        // Check if deadline passed - if so, automatically expire and refund creator
+        if (block.timestamp > job.deadline) {
+            uint256 refund = job.payment;
+            job.status = JobStatus.Expired;
+            
+            emit JobExpired(_jobId, job.creator, refund);
+            
+            (bool success, ) = payable(job.creator).call{value: refund}("");
+            require(success, "Refund failed");
+            
+            // Return early - no revert, transaction succeeds with refund
+            return;
         }
-
-        job.submissions.push(
-            Submission({
-                worker: msg.sender,
-                chosen: false,
-                previewCID: previewCID,
-                finalCID: ""
-            })
-        );
-        userSubmissionCount[jobId][msg.sender]++;
-
-        uint256 submissionId = job.submissions.length - 1;
-        emit SubmissionCreated(jobId, submissionId, msg.sender);
+        
+        uint256 platformFee = (job.payment * platformFeePercent) / BASIS_POINTS;
+        uint256 workerPayment = job.payment - platformFee;
+        
+        // Update state before transfers (CEI pattern)
+        job.status = JobStatus.Completed;
+        
+        // Transfer payments
+        (bool successWorker, ) = payable(job.worker).call{value: workerPayment}("");
+        require(successWorker, "Worker payment failed");
+        
+        (bool successPlatform, ) = payable(platformOwner).call{value: platformFee}("");
+        require(successPlatform, "Platform fee transfer failed");
+        
+        emit JobCompleted(_jobId, job.worker, workerPayment, platformFee);
     }
-
-    // ========================================
-    // APPROVE SUBMISSION
-    // ========================================
-
-    function approveSubmission(
-        uint256 jobId,
-        uint256 submissionId,
-        string calldata finalCID
-    ) external whenNotPaused nonReentrant {
-        Job storage job = jobs[jobId];
-
-        require(_jobExists(jobId), "Job does not exist");
-        require(msg.sender == job.creator, "Only creator can approve");
-        require(job.status == JobStatus.Open, "Job not open");
-
-        require(block.timestamp <= job.deadline + GRACE_PERIOD, "Deadline expired");
-        require(submissionId < job.submissions.length, "Invalid submission");
-
-        Submission storage submission = job.submissions[submissionId];
-        require(!submission.chosen, "Already chosen");
-        require(submission.worker != address(0), "Invalid worker");
-
-        require(_isValidCID(finalCID), "Invalid final CID");
-        require(
-            keccak256(bytes(finalCID)) != keccak256(bytes(submission.previewCID)),
-            "Final CID must differ from preview"
-        );
-
-        // Effects
-        job.status = JobStatus.Approved;
-        submission.chosen = true;
-        submission.finalCID = finalCID;
-
-        uint256 budget = job.budget;
-        uint256 feeAmount = (budget * job.feeBps) / FEE_BASIS;
-        uint256 workerAmount = budget - feeAmount;
-
-        job.budget = 0;
-
-        // Interactions
-        if (workerAmount > 0) {
-            TRUST.safeTransfer(submission.worker, workerAmount);
-        }
-        if (feeAmount > 0) {
-            TRUST.safeTransfer(treasury, feeAmount);
-        }
-
-        emit SubmissionApproved(jobId, submissionId, submission.worker, workerAmount, feeAmount);
-    }
-
-    // ========================================
-    // REFUND EXPIRED JOB
-    // ========================================
-
-    function refundIfExpired(uint256 jobId) external whenNotPaused nonReentrant {
-        Job storage job = jobs[jobId];
-
-        require(_jobExists(jobId), "Job does not exist");
-        require(msg.sender == job.creator, "Only creator can refund");
-        require(job.status == JobStatus.Open, "Job not refundable");
-        require(block.timestamp > job.deadline + GRACE_PERIOD, "Grace period not ended");
-
-        job.status = JobStatus.Refunded;
-        uint256 refundAmount = job.budget;
-        job.budget = 0;
-
-        if (refundAmount > 0) {
-            TRUST.safeTransfer(job.creator, refundAmount);
-        }
-
-        emit JobRefunded(jobId, refundAmount);
-    }
-
-    // ========================================
-    // CANCEL JOB (Before submissions)
-    // ========================================
-
-    function cancelJob(uint256 jobId) external whenNotPaused nonReentrant {
-        Job storage job = jobs[jobId];
-
-        require(_jobExists(jobId), "Job does not exist");
+    
+    /**
+     * @dev Creator cancels job if no submissions exist
+     * @param _jobId The job ID
+     */
+    function cancelJob(uint256 _jobId) external nonReentrant whenNotPaused {
+        Job storage job = jobs[_jobId];
         require(msg.sender == job.creator, "Only creator can cancel");
-        require(job.status == JobStatus.Open, "Job not cancellable");
-        require(job.submissions.length == 0, "Cannot cancel with submissions");
-
+        require(job.status == JobStatus.Active, "Job not active");
+        require(!job.hasSubmission, "Cannot cancel with submissions");
+        
+        uint256 refund = job.payment;
+        
+        // Update state before transfer (CEI pattern)
         job.status = JobStatus.Cancelled;
-        uint256 refundAmount = job.budget;
-        job.budget = 0;
-
-        if (refundAmount > 0) {
-            TRUST.safeTransfer(job.creator, refundAmount);
-        }
-
-        emit JobCancelled(jobId, refundAmount);
+        
+        (bool success, ) = payable(job.creator).call{value: refund}("");
+        require(success, "Refund failed");
+        
+        emit JobCancelled(_jobId, job.creator, refund);
     }
-
-    // ========================================
-    // EMERGENCY RECOVERY
-    // ========================================
-
+    
     /**
-     * @dev Emergency function to recover funds from truly stuck jobs
-     * Requirements:
-     * - Job must be approved or refunded with remaining budget
-     * - Must wait 30 days after job status change
-     * - Only admin can execute
+     * @dev Trigger automatic expiration for jobs past deadline
+     * @param _jobId The job ID
+     * @dev Can be called by anyone to clean up expired jobs and return funds
      */
-    function emergencyRecoverJob(uint256 jobId, address recipient)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-        nonReentrant
-    {
-        Job storage job = jobs[jobId];
-
-        require(_jobExists(jobId), "Job does not exist");
-        require(recipient != address(0), "Invalid recipient");
-        require(
-            job.status == JobStatus.Approved || job.status == JobStatus.Refunded,
-            "Job must be closed"
-        );
-        require(job.budget > 0, "No funds to recover");
-        require(block.timestamp > job.deadline + 30 days, "Must wait 30 days after deadline");
-
-        uint256 amount = job.budget;
-        job.budget = 0;
-
-        TRUST.safeTransfer(recipient, amount);
-        emit EmergencyRecovery(jobId, recipient, amount);
+    function expireJob(uint256 _jobId) external nonReentrant whenNotPaused {
+        Job storage job = jobs[_jobId];
+        require(job.status == JobStatus.Active, "Job not active");
+        require(block.timestamp > job.deadline, "Deadline not passed");
+        
+        uint256 refund = job.payment;
+        
+        // Update state before transfer (CEI pattern)
+        job.status = JobStatus.Expired;
+        
+        (bool success, ) = payable(job.creator).call{value: refund}("");
+        require(success, "Refund failed");
+        
+        emit JobExpired(_jobId, job.creator, refund);
     }
-
+    
     /**
-     * @dev Recover accidentally sent non-TRUST tokens
+     * @dev Emergency withdraw - only when paused, only for platform owner
+     * @dev Allows recovery of stuck funds in extreme cases
      */
-    function recoverERC20(
-        IERC20 token,
-        address recipient,
-        uint256 amount
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(recipient != address(0), "Invalid recipient");
-        require(address(token) != address(TRUST), "Cannot recover TRUST");
-        token.safeTransfer(recipient, amount);
+    function emergencyWithdrawJob(uint256 _jobId) external onlyPlatformOwner whenPaused nonReentrant {
+        Job storage job = jobs[_jobId];
+        require(job.status == JobStatus.Active, "Job not active");
+        
+        uint256 refund = job.payment;
+        job.status = JobStatus.Cancelled;
+        
+        (bool success, ) = payable(job.creator).call{value: refund}("");
+        require(success, "Emergency withdrawal failed");
+        
+        emit JobCancelled(_jobId, job.creator, refund);
     }
-
-    // ========================================
-    // VIEW FUNCTIONS
-    // ========================================
-
-    function getJob(uint256 jobId)
-        external
-        view
-        returns (
-            address creator,
-            uint256 budget,
-            uint256 deadline,
-            uint16 feeBps,
-            JobStatus status,
-            string memory description,
-            uint256 submissionCount
-        )
-    {
-        Job storage job = jobs[jobId];
+    
+    /**
+     * @dev Get job details
+     */
+    function getJob(uint256 _jobId) external view returns (
+        address creator,
+        uint256 payment,
+        uint256 deadline,
+        JobStatus status,
+        bool hasSubmission,
+        address worker,
+        bytes32 submissionHash
+    ) {
+        Job memory job = jobs[_jobId];
         return (
             job.creator,
-            job.budget,
+            job.payment,
             job.deadline,
-            job.feeBps,
             job.status,
-            job.description,
-            job.submissions.length
+            job.hasSubmission,
+            job.worker,
+            job.submissionHash
         );
     }
-
-    function getSubmissionCount(uint256 jobId) external view returns (uint256) {
-        return jobs[jobId].submissions.length;
-    }
-
-    function getSubmission(uint256 jobId, uint256 index)
-        external
-        view
-        returns (
-            address worker,
-            bool chosen,
-            string memory previewCID,
-            string memory finalCID
-        )
-    {
-        require(_jobExists(jobId), "Job does not exist");
-        require(index < jobs[jobId].submissions.length, "Index out of bounds");
-
-        Submission storage sub = jobs[jobId].submissions[index];
-        return (sub.worker, sub.chosen, sub.previewCID, sub.finalCID);
-    }
-
-    function getSubmissions(
-        uint256 jobId,
-        uint256 start,
-        uint256 count
-    )
-        external
-        view
-        returns (
-            address[] memory workers,
-            bool[] memory chosen,
-            string[] memory previewCIDs
-        )
-    {
-        require(_jobExists(jobId), "Job does not exist");
-
-        Submission[] storage subs = jobs[jobId].submissions;
-        uint256 total = subs.length;
-        require(start < total, "Start index out of bounds");
-
-        uint256 end = start + count;
-        if (end > total) {
-            end = total;
-        }
-
-        uint256 resultCount = end - start;
-        workers = new address[](resultCount);
-        chosen = new bool[](resultCount);
-        previewCIDs = new string[](resultCount);
-
-        for (uint256 i = 0; i < resultCount; i++) {
-            Submission storage sub = subs[start + i];
-            workers[i] = sub.worker;
-            chosen[i] = sub.chosen;
-            previewCIDs[i] = sub.previewCID;
-        }
-    }
-
-    // ========================================
-    // INTERNAL HELPERS
-    // ========================================
-
-    function _jobExists(uint256 jobId) private view returns (bool) {
-        return jobId > 0 && jobId <= jobCounter && jobs[jobId].creator != address(0);
-    }
-
+    
     /**
-     * @dev Validate IPFS CID format
-     * Supports CIDv0 (46 chars, starts with "Qm") and CIDv1 (variable length, starts with "b")
+     * @dev Check if a job is expired (view function)
      */
-    function _isValidCID(string memory cid) private pure returns (bool) {
-        bytes memory b = bytes(cid);
-        uint256 len = b.length;
-
-        if (len < 46) return false;
-
-        // CIDv0: exactly 46 characters, starts with "Qm"
-        if (len == 46) {
-            return b[0] == "Q" && b[1] == "m";
-        }
-
-        // CIDv1: starts with "baf"
-        if (len >= 59 && b[0] == "b" && b[1] == "a" && b[2] == "f") {
-            return true;
-        }
-
-        return false;
+    function isJobExpired(uint256 _jobId) external view returns (bool) {
+        Job memory job = jobs[_jobId];
+        return job.status == JobStatus.Active && block.timestamp > job.deadline;
     }
-
-    // ========================================
-    // FALLBACK
-    // ========================================
-
-    receive() external payable {
-        revert("Contract does not accept ETH");
+    
+    /**
+     * @dev Update platform fee (only owner)
+     */
+    function updatePlatformFee(uint256 _newFeePercent) external onlyPlatformOwner {
+        require(_newFeePercent <= 1000, "Fee too high"); // Max 10%
+        platformFeePercent = _newFeePercent;
     }
-
-    fallback() external payable {
-        revert("Invalid function call");
+    
+    /**
+     * @dev Transfer platform ownership
+     */
+    function transferOwnership(address newOwner) external onlyPlatformOwner {
+        require(newOwner != address(0), "Invalid new owner");
+        platformOwner = newOwner;
     }
 }
-
-

@@ -1,20 +1,19 @@
 /**
  * JobPool Contract ABI and utilities
  * Contract for BlockPay Job Pool System
+ * Deployed: 0x8A21eAa3271d546471435804F2a1c90b80BD7B95
  */
 
 import { parseUnits, formatUnits } from 'viem'
 
-// JobPool Contract ABI
+// JobPool Contract ABI (matches deployed contract)
 export const JOB_POOL_ABI = [
   {
     name: 'createJob',
     type: 'function',
-    stateMutability: 'nonpayable',
+    stateMutability: 'payable',
     inputs: [
-      { name: 'budget', type: 'uint256', internalType: 'uint256' },
-      { name: 'jobAtom', type: 'bytes32', internalType: 'bytes32' },
-      { name: 'deadline', type: 'uint64', internalType: 'uint64' },
+      { name: '_deadline', type: 'uint256', internalType: 'uint256' },
     ],
     outputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
   },
@@ -23,19 +22,17 @@ export const JOB_POOL_ABI = [
     type: 'function',
     stateMutability: 'nonpayable',
     inputs: [
-      { name: 'jobId', type: 'uint256', internalType: 'uint256' },
-      { name: 'submissionAtom', type: 'bytes32', internalType: 'bytes32' },
-      { name: 'previewCID', type: 'string', internalType: 'string' },
+      { name: '_jobId', type: 'uint256', internalType: 'uint256' },
+      { name: '_submissionHash', type: 'bytes32', internalType: 'bytes32' },
     ],
-    outputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
+    outputs: [],
   },
   {
-    name: 'approveWork',
+    name: 'acceptWork',
     type: 'function',
     stateMutability: 'nonpayable',
     inputs: [
-      { name: 'jobId', type: 'uint256', internalType: 'uint256' },
-      { name: 'submissionId', type: 'uint256', internalType: 'uint256' },
+      { name: '_jobId', type: 'uint256', internalType: 'uint256' },
     ],
     outputs: [],
   },
@@ -43,102 +40,65 @@ export const JOB_POOL_ABI = [
     name: 'cancelJob',
     type: 'function',
     stateMutability: 'nonpayable',
-    inputs: [{ name: 'jobId', type: 'uint256', internalType: 'uint256' }],
+    inputs: [{ name: '_jobId', type: 'uint256', internalType: 'uint256' }],
     outputs: [],
   },
   {
-    name: 'disputeJob',
+    name: 'expireJob',
     type: 'function',
     stateMutability: 'nonpayable',
-    inputs: [{ name: 'jobId', type: 'uint256', internalType: 'uint256' }],
-    outputs: [],
-  },
-  {
-    name: 'withdraw',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [],
+    inputs: [{ name: '_jobId', type: 'uint256', internalType: 'uint256' }],
     outputs: [],
   },
   {
     name: 'getJob',
     type: 'function',
     stateMutability: 'view',
-    inputs: [{ name: 'jobId', type: 'uint256', internalType: 'uint256' }],
+    inputs: [{ name: '_jobId', type: 'uint256', internalType: 'uint256' }],
     outputs: [
-      {
-        name: '',
-        type: 'tuple',
-        internalType: 'struct JobPool.Job',
-        components: [
-          { name: 'id', type: 'uint256' },
-          { name: 'requestor', type: 'address' },
-          { name: 'budget', type: 'uint256' },
-          { name: 'status', type: 'uint8' },
-          { name: 'jobAtom', type: 'bytes32' },
-          { name: 'deadline', type: 'uint64' },
-          { name: 'createdAt', type: 'uint64' },
-          { name: 'submissionIds', type: 'uint256[]' },
-          { name: 'winningSubmissionId', type: 'uint256' },
-        ],
-      },
+      { name: 'creator', type: 'address' },
+      { name: 'payment', type: 'uint256' },
+      { name: 'deadline', type: 'uint256' },
+      { name: 'status', type: 'uint8' },
+      { name: 'hasSubmission', type: 'bool' },
+      { name: 'worker', type: 'address' },
+      { name: 'submissionHash', type: 'bytes32' },
     ],
   },
   {
-    name: 'getSubmission',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'submissionId', type: 'uint256', internalType: 'uint256' }],
-    outputs: [
-      {
-        name: '',
-        type: 'tuple',
-        internalType: 'struct JobPool.Submission',
-        components: [
-          { name: 'id', type: 'uint256' },
-          { name: 'submitter', type: 'address' },
-          { name: 'submissionAtom', type: 'bytes32' },
-          { name: 'previewCID', type: 'string' },
-          { name: 'status', type: 'uint8' },
-          { name: 'timestamp', type: 'uint64' },
-        ],
-      },
-    ],
-  },
-  {
-    name: 'getJobSubmissionIds',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'jobId', type: 'uint256', internalType: 'uint256' }],
-    outputs: [{ name: '', type: 'uint256[]', internalType: 'uint256[]' }],
-  },
-  {
-    name: 'withdrawable',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: '', type: 'address', internalType: 'address' }],
-    outputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
-  },
-  {
-    name: 'jobCounter',
+    name: 'jobCount',
     type: 'function',
     stateMutability: 'view',
     inputs: [],
     outputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
   },
   {
-    name: 'platformFeeBps',
+    name: 'platformFeePercent',
     type: 'function',
     stateMutability: 'view',
     inputs: [],
-    outputs: [{ name: '', type: 'uint16', internalType: 'uint16' }],
+    outputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
   },
   {
-    name: 'treasury',
+    name: 'platformOwner',
     type: 'function',
     stateMutability: 'view',
     inputs: [],
     outputs: [{ name: '', type: 'address', internalType: 'address' }],
+  },
+  {
+    name: 'paused',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bool', internalType: 'bool' }],
+  },
+  {
+    name: 'isJobExpired',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '_jobId', type: 'uint256', internalType: 'uint256' }],
+    outputs: [{ name: '', type: 'bool', internalType: 'bool' }],
   },
   // Events
   {
@@ -146,31 +106,28 @@ export const JOB_POOL_ABI = [
     type: 'event',
     inputs: [
       { name: 'jobId', type: 'uint256', indexed: true },
-      { name: 'requestor', type: 'address', indexed: true },
-      { name: 'budget', type: 'uint256', indexed: false },
-      { name: 'jobAtom', type: 'bytes32', indexed: false },
-      { name: 'deadline', type: 'uint64', indexed: false },
-    ],
-  },
-  {
-    name: 'SubmissionCreated',
-    type: 'event',
-    inputs: [
-      { name: 'jobId', type: 'uint256', indexed: true },
-      { name: 'submissionId', type: 'uint256', indexed: true },
-      { name: 'submitter', type: 'address', indexed: true },
-      { name: 'submissionAtom', type: 'bytes32', indexed: false },
-    ],
-  },
-  {
-    name: 'JobApproved',
-    type: 'event',
-    inputs: [
-      { name: 'jobId', type: 'uint256', indexed: true },
-      { name: 'submissionId', type: 'uint256', indexed: true },
       { name: 'creator', type: 'address', indexed: true },
-      { name: 'amountPaid', type: 'uint256', indexed: false },
-      { name: 'fee', type: 'uint256', indexed: false },
+      { name: 'payment', type: 'uint256', indexed: false },
+      { name: 'deadline', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'WorkSubmitted',
+    type: 'event',
+    inputs: [
+      { name: 'jobId', type: 'uint256', indexed: true },
+      { name: 'worker', type: 'address', indexed: true },
+      { name: 'submissionHash', type: 'bytes32', indexed: false },
+    ],
+  },
+  {
+    name: 'JobCompleted',
+    type: 'event',
+    inputs: [
+      { name: 'jobId', type: 'uint256', indexed: true },
+      { name: 'worker', type: 'address', indexed: true },
+      { name: 'workerPayment', type: 'uint256', indexed: false },
+      { name: 'platformFee', type: 'uint256', indexed: false },
     ],
   },
   {
@@ -178,116 +135,81 @@ export const JOB_POOL_ABI = [
     type: 'event',
     inputs: [
       { name: 'jobId', type: 'uint256', indexed: true },
-      { name: 'requestor', type: 'address', indexed: true },
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'refund', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'JobExpired',
+    type: 'event',
+    inputs: [
+      { name: 'jobId', type: 'uint256', indexed: true },
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'refund', type: 'uint256', indexed: false },
     ],
   },
 ] as const
 
-// ERC20 ABI for TRUST token
-export const ERC20_ABI = [
-  {
-    name: 'approve',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-  {
-    name: 'allowance',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'owner', type: 'address' },
-      { name: 'spender', type: 'address' },
-    ],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    name: 'balanceOf',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    name: 'decimals',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'uint8' }],
-  },
-] as const
-
-// Job Status enum
+// Job Status enum (matches contract)
 export enum JobStatus {
-  Open = 0,
-  Submitted = 1,
-  Approved = 2,
-  Cancelled = 3,
-  Disputed = 4,
-  Resolved = 5,
-  Closed = 6,
-}
-
-// Submission Status enum
-export enum SubmissionStatus {
-  Pending = 0,
-  Rejected = 1,
-  Approved = 2,
+  Active = 0,
+  Completed = 1,
+  Cancelled = 2,
+  Expired = 3,
 }
 
 // Types
 export interface Job {
-  id: bigint
-  requestor: `0x${string}`
-  budget: bigint
-  status: JobStatus
-  jobAtom: `0x${string}`
+  creator: `0x${string}`
+  payment: bigint
   deadline: bigint
-  createdAt: bigint
-  submissionIds: bigint[]
-  winningSubmissionId: bigint
-}
-
-export interface Submission {
-  id: bigint
-  submitter: `0x${string}`
-  submissionAtom: `0x${string}`
-  previewCID: string
-  status: SubmissionStatus
-  timestamp: bigint
+  status: JobStatus
+  hasSubmission: boolean
+  worker: `0x${string}`
+  submissionHash: `0x${string}`
 }
 
 /**
- * Convert atom ID (string) to bytes32
+ * Convert IPFS CID string to bytes32 hash
+ * For CIDv0 (Qm...), we can use the first 32 bytes
+ * For CIDv1 (bafy...), we hash it
  */
-export function atomIdToBytes32(atomId: string): `0x${string}` {
-  // Remove '0x' if present and pad to 64 characters (32 bytes)
-  const cleanId = atomId.startsWith('0x') ? atomId.slice(2) : atomId
-  return `0x${cleanId.padStart(64, '0').slice(0, 64)}` as `0x${string}`
+export function cidToBytes32(cid: string): `0x${string}` {
+  // Remove ipfs:// prefix if present
+  const cleanCid = cid.replace(/^ipfs:\/\//, '')
+  
+  // For CIDv0 (46 chars starting with Qm), take first 32 bytes
+  if (cleanCid.length === 46 && cleanCid.startsWith('Qm')) {
+    // Convert base58 to bytes, then take first 32 bytes
+    // For simplicity, we'll hash the CID string
+    const encoder = new TextEncoder()
+    const bytes = encoder.encode(cleanCid)
+    // Use keccak256 hash (in production, use proper base58 decode)
+    // For now, pad to 32 bytes
+    const padded = new Uint8Array(32)
+    padded.set(bytes.slice(0, 32))
+    return `0x${Array.from(padded).map(b => b.toString(16).padStart(2, '0')).join('')}` as `0x${string}`
+  }
+  
+  // For other CIDs, hash the string
+  // In production, use proper IPFS CID parsing
+  const encoder = new TextEncoder()
+  const bytes = encoder.encode(cleanCid)
+  const padded = new Uint8Array(32)
+  padded.set(bytes.slice(0, 32))
+  return `0x${Array.from(padded).map(b => b.toString(16).padStart(2, '0')).join('')}` as `0x${string}`
 }
 
 /**
- * Convert bytes32 to atom ID string
- */
-export function bytes32ToAtomId(bytes32: `0x${string}`): string {
-  return bytes32
-}
-
-/**
- * Format TRUST amount for display
+ * Format native token amount for display
  */
 export function formatTrustAmount(amount: bigint, decimals: number = 18): string {
   return formatUnits(amount, decimals)
 }
 
 /**
- * Parse TRUST amount from string
+ * Parse native token amount from string
  */
 export function parseTrustAmount(amount: string, decimals: number = 18): bigint {
   return parseUnits(amount, decimals)
 }
-

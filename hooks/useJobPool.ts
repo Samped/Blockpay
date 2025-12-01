@@ -1,14 +1,13 @@
 'use client'
 
 import { useAccount, usePublicClient, useWalletClient, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
-import { JOB_POOL_ABI, ERC20_ABI, Job, Submission, JobStatus, SubmissionStatus } from '@/lib/jobPoolContract'
+import { parseEther } from 'viem'
+import { JOB_POOL_ABI, Job, JobStatus, cidToBytes32 } from '@/lib/jobPoolContract'
 import { parseTrustAmount } from '@/lib/jobPoolContract'
-import { atomDataToBytes } from '@/lib/intuitionContract'
 import { intuitionClient } from '@/lib/intuitionClient'
 
-// Contract addresses (update these after deployment)
-export const JOB_POOL_ADDRESS = process.env.NEXT_PUBLIC_JOB_POOL_ADDRESS || '0x0000000000000000000000000000000000000000'
-export const TRUST_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TRUST_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000'
+// Contract address (deployed on Intuition testnet)
+export const JOB_POOL_ADDRESS = process.env.NEXT_PUBLIC_JOB_POOL_ADDRESS || '0x8A21eAa3271d546471435804F2a1c90b80BD7B95'
 
 export function useJobPool() {
   const { address, isConnected } = useAccount()
@@ -17,11 +16,11 @@ export function useJobPool() {
   const { writeContract, data: hash, isPending: isWriting, error: writeError } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash })
 
-  // Read job counter
-  const { data: jobCounter } = useReadContract({
+  // Read job count
+  const { data: jobCount } = useReadContract({
     address: JOB_POOL_ADDRESS as `0x${string}`,
     abi: JOB_POOL_ABI,
-    functionName: 'jobCounter',
+    functionName: 'jobCount',
     query: {
       enabled: !!JOB_POOL_ADDRESS && JOB_POOL_ADDRESS !== '0x0000000000000000000000000000000000000000',
     },
@@ -97,42 +96,11 @@ export function useJobPool() {
   }
 
   /**
-   * Check and approve TRUST token allowance
-   */
-  async function ensureApproval(amount: bigint): Promise<boolean> {
-    if (!address || !publicClient) return false
-
-    try {
-      const allowance = await publicClient.readContract({
-        address: TRUST_TOKEN_ADDRESS as `0x${string}`,
-        abi: ERC20_ABI,
-        functionName: 'allowance',
-        args: [address, JOB_POOL_ADDRESS as `0x${string}`],
-      })
-
-      if (allowance < amount) {
-        writeContract({
-          address: TRUST_TOKEN_ADDRESS as `0x${string}`,
-          abi: ERC20_ABI,
-          functionName: 'approve',
-          args: [JOB_POOL_ADDRESS as `0x${string}`, amount],
-        })
-        return false // Will need to wait for approval
-      }
-      return true
-    } catch (error) {
-      console.error('Error checking allowance:', error)
-      return false
-    }
-  }
-
-  /**
-   * Create a job
+   * Create a job (payable - sends native token as escrow)
    */
   async function createJob(
     budget: string,
-    jobAtomId: string | null,
-    deadline: number = 0
+    deadline: number
   ): Promise<{ success: boolean; jobId?: bigint; error?: string }> {
     if (!isConnected || !address) {
       return { success: false, error: 'Please connect your wallet' }
@@ -141,22 +109,13 @@ export function useJobPool() {
     try {
       const budgetAmount = parseTrustAmount(budget)
       
-      // Ensure approval
-      const approved = await ensureApproval(budgetAmount)
-      if (!approved) {
-        return { success: false, error: 'Please approve TRUST token spending first' }
-      }
-
-      // Convert atom ID to bytes32 (use zero if not provided)
-      const jobAtomBytes32 = jobAtomId 
-        ? (jobAtomId.startsWith('0x') ? jobAtomId : `0x${jobAtomId}`).padEnd(66, '0').slice(0, 66) as `0x${string}`
-        : '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
-
+      // createJob is payable - send native token as msg.value
       writeContract({
         address: JOB_POOL_ADDRESS as `0x${string}`,
         abi: JOB_POOL_ABI,
         functionName: 'createJob',
-        args: [budgetAmount, jobAtomBytes32, BigInt(deadline)],
+        args: [BigInt(deadline)],
+        value: budgetAmount,
       })
 
       return { success: true }
@@ -171,23 +130,21 @@ export function useJobPool() {
    */
   async function submitWork(
     jobId: bigint,
-    submissionAtomId: string | null,
     previewCID: string
-  ): Promise<{ success: boolean; submissionId?: bigint; error?: string }> {
+  ): Promise<{ success: boolean; error?: string }> {
     if (!isConnected || !address) {
       return { success: false, error: 'Please connect your wallet' }
     }
 
     try {
-      const submissionAtomBytes32 = submissionAtomId
-        ? (submissionAtomId.startsWith('0x') ? submissionAtomId : `0x${submissionAtomId}`).padEnd(66, '0').slice(0, 66) as `0x${string}`
-        : '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
+      // Convert CID string to bytes32 hash
+      const submissionHash = cidToBytes32(previewCID)
 
       writeContract({
         address: JOB_POOL_ADDRESS as `0x${string}`,
         abi: JOB_POOL_ABI,
         functionName: 'submitWork',
-        args: [jobId, submissionAtomBytes32, previewCID],
+        args: [jobId, submissionHash],
       })
 
       return { success: true }
@@ -198,11 +155,10 @@ export function useJobPool() {
   }
 
   /**
-   * Approve a submission
+   * Accept work (creator approves submission and releases payment)
    */
-  async function approveWork(
-    jobId: bigint,
-    submissionId: bigint
+  async function acceptWork(
+    jobId: bigint
   ): Promise<{ success: boolean; error?: string }> {
     if (!isConnected || !address) {
       return { success: false, error: 'Please connect your wallet' }
@@ -212,19 +168,19 @@ export function useJobPool() {
       writeContract({
         address: JOB_POOL_ADDRESS as `0x${string}`,
         abi: JOB_POOL_ABI,
-        functionName: 'approveWork',
-        args: [jobId, submissionId],
+        functionName: 'acceptWork',
+        args: [jobId],
       })
 
       return { success: true }
     } catch (error: any) {
-      console.error('Error approving work:', error)
-      return { success: false, error: error.message || 'Failed to approve work' }
+      console.error('Error accepting work:', error)
+      return { success: false, error: error.message || 'Failed to accept work' }
     }
   }
 
   /**
-   * Cancel a job
+   * Cancel a job (only if no submissions)
    */
   async function cancelJob(jobId: bigint): Promise<{ success: boolean; error?: string }> {
     if (!isConnected || !address) {
@@ -247,9 +203,9 @@ export function useJobPool() {
   }
 
   /**
-   * Withdraw available balance
+   * Expire a job (anyone can call after deadline)
    */
-  async function withdraw(): Promise<{ success: boolean; error?: string }> {
+  async function expireJob(jobId: bigint): Promise<{ success: boolean; error?: string }> {
     if (!isConnected || !address) {
       return { success: false, error: 'Please connect your wallet' }
     }
@@ -258,14 +214,14 @@ export function useJobPool() {
       writeContract({
         address: JOB_POOL_ADDRESS as `0x${string}`,
         abi: JOB_POOL_ABI,
-        functionName: 'withdraw',
-        args: [],
+        functionName: 'expireJob',
+        args: [jobId],
       })
 
       return { success: true }
     } catch (error: any) {
-      console.error('Error withdrawing:', error)
-      return { success: false, error: error.message || 'Failed to withdraw' }
+      console.error('Error expiring job:', error)
+      return { success: false, error: error.message || 'Failed to expire job' }
     }
   }
 
@@ -276,14 +232,23 @@ export function useJobPool() {
     if (!publicClient) return null
 
     try {
-      const job = await publicClient.readContract({
+      const result = await publicClient.readContract({
         address: JOB_POOL_ADDRESS as `0x${string}`,
         abi: JOB_POOL_ABI,
         functionName: 'getJob',
         args: [jobId],
       })
 
-      return job as Job
+      // Result is a tuple: [creator, payment, deadline, status, hasSubmission, worker, submissionHash]
+      return {
+        creator: result[0] as `0x${string}`,
+        payment: result[1] as bigint,
+        deadline: result[2] as bigint,
+        status: result[3] as JobStatus,
+        hasSubmission: result[4] as boolean,
+        worker: result[5] as `0x${string}`,
+        submissionHash: result[6] as `0x${string}`,
+      }
     } catch (error) {
       console.error('Error fetching job:', error)
       return null
@@ -291,44 +256,23 @@ export function useJobPool() {
   }
 
   /**
-   * Get submission details
+   * Check if job is expired
    */
-  async function getSubmission(submissionId: bigint): Promise<Submission | null> {
-    if (!publicClient) return null
+  async function isJobExpired(jobId: bigint): Promise<boolean> {
+    if (!publicClient) return false
 
     try {
-      const submission = await publicClient.readContract({
+      const expired = await publicClient.readContract({
         address: JOB_POOL_ADDRESS as `0x${string}`,
         abi: JOB_POOL_ABI,
-        functionName: 'getSubmission',
-        args: [submissionId],
+        functionName: 'isJobExpired',
+        args: [jobId],
       })
 
-      return submission as Submission
+      return expired as boolean
     } catch (error) {
-      console.error('Error fetching submission:', error)
-      return null
-    }
-  }
-
-  /**
-   * Get withdrawable balance for current user
-   */
-  async function getWithdrawableBalance(): Promise<bigint> {
-    if (!address || !publicClient) return 0n
-
-    try {
-      const balance = await publicClient.readContract({
-        address: JOB_POOL_ADDRESS as `0x${string}`,
-        abi: JOB_POOL_ABI,
-        functionName: 'withdrawable',
-        args: [address],
-      })
-
-      return balance as bigint
-    } catch (error) {
-      console.error('Error fetching withdrawable balance:', error)
-      return 0n
+      console.error('Error checking job expiration:', error)
+      return false
     }
   }
 
@@ -341,20 +285,17 @@ export function useJobPool() {
     isConfirmed,
     hash,
     writeError,
-    jobCounter,
+    jobCount,
     
     // Functions
     createJobAtom,
     createSubmissionAtom,
     createJob,
     submitWork,
-    approveWork,
+    acceptWork,
     cancelJob,
-    withdraw,
+    expireJob,
     getJob,
-    getSubmission,
-    getWithdrawableBalance,
-    ensureApproval,
+    isJobExpired,
   }
 }
-
