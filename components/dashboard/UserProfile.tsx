@@ -291,7 +291,7 @@ export function UserProfile({ address }: UserProfileProps) {
                     displayName = bestParsedData.bio.substring(0, 30)
                   } else if (bestParsedData.email) {
                     displayName = bestParsedData.email.split('@')[0]
-                  } else if (bestParsedData.twitter) {
+                  } else if (bestParsedData.twitter && typeof bestParsedData.twitter === 'string') {
                     displayName = bestParsedData.twitter.replace('@', '')
                   } else if (bestParsedData.github) {
                     displayName = bestParsedData.github
