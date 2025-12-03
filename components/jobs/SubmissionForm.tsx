@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAccount } from 'wagmi'
 import { useJobPool } from '@/hooks/useJobPool'
 import { uploadToIPFS as uploadFilebaseToIPFS } from '@/frontend/uploadToIPFS'
@@ -13,7 +13,7 @@ interface SubmissionFormProps {
 
 export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormProps) {
   const { address, isConnected } = useAccount()
-  const { createSubmissionAtom, submitWork, isWriting, isConfirming } = useJobPool()
+  const { submitWork, isWriting, isConfirming, isConfirmed, hash, writeError } = useJobPool()
   
   const [formData, setFormData] = useState({
     description: '',
@@ -22,6 +22,58 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [step, setStep] = useState<'form' | 'uploading' | 'creating' | 'success'>('form')
+
+  // Store submission metadata and preview CID for later retrieval
+  const [submissionMetadata, setSubmissionMetadata] = useState<{
+    previewCID: string
+    metadataCID: string
+    metadata: any
+  } | null>(null)
+
+  // Watch for transaction confirmation
+  useEffect(() => {
+    if (isConfirmed && hash && step === 'creating' && submissionMetadata) {
+      // Transaction confirmed! Store submission metadata in localStorage
+      const storageKey = `submission_metadata_${jobId.toString()}_${address}`
+      localStorage.setItem(storageKey, JSON.stringify({
+        jobId: jobId.toString(),
+        worker: address,
+        previewCID: submissionMetadata.previewCID,
+        metadataCID: submissionMetadata.metadataCID,
+        metadata: submissionMetadata.metadata,
+        transactionHash: hash,
+        createdAt: new Date().toISOString(),
+      }))
+      console.log('Stored submission metadata in localStorage:', storageKey)
+      
+      // Also store with jobId as key for easier lookup
+      const jobKey = `submission_metadata_job_${jobId.toString()}`
+      localStorage.setItem(jobKey, JSON.stringify({
+        jobId: jobId.toString(),
+        worker: address,
+        previewCID: submissionMetadata.previewCID,
+        metadataCID: submissionMetadata.metadataCID,
+        metadata: submissionMetadata.metadata,
+        transactionHash: hash,
+        createdAt: new Date().toISOString(),
+      }))
+      
+      // Show success
+      setStep('success')
+      if (onSuccess) {
+        setTimeout(() => onSuccess(), 2000)
+      }
+    }
+  }, [isConfirmed, hash, step, onSuccess, submissionMetadata, jobId, address])
+
+  // Watch for transaction errors
+  useEffect(() => {
+    if (writeError && step === 'creating') {
+      console.error('Transaction error:', writeError)
+      setError(writeError.message || 'Transaction failed. Please try again.')
+      setStep('form')
+    }
+  }, [writeError, step])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -75,19 +127,17 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
       })
       console.log('Submission metadata uploaded to IPFS (Filebase):', metadataResult.cid)
 
-      // Step 3: Create submission atom in Intuition
-      setStep('creating')
-      const submissionAtomId = await createSubmissionAtom({
-        jobId: jobId.toString(),
+      // Store metadata for later (will be saved to localStorage after transaction confirmation)
+      setSubmissionMetadata({
         previewCID: previewResult.cid,
-        description: formData.description,
         metadataCID: metadataResult.cid,
+        metadata: submissionMetadata,
       })
 
-      // Step 4: Submit work on-chain
+      // Step 3: Submit work on-chain (this will trigger the transaction)
+      setStep('creating')
       const result = await submitWork(
         jobId,
-        submissionAtomId,
         previewResult.cid
       )
       
@@ -95,10 +145,8 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
         throw new Error(result.error || 'Failed to submit work')
       }
 
-      setStep('success')
-      if (onSuccess) {
-        setTimeout(() => onSuccess(), 2000)
-      }
+      // Don't show success yet - wait for transaction confirmation via useEffect
+      // The success message will be shown when isConfirmed becomes true
     } catch (err: any) {
       console.error('Error submitting work:', err)
       setError(err.message || 'Failed to submit work')
