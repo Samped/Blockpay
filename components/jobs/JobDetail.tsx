@@ -7,6 +7,10 @@ import { Job, Submission, JobStatus, SubmissionStatus, formatTrustAmount } from 
 import { getIPFSUrl } from '@/lib/ipfs'
 import { SubmissionForm } from './SubmissionForm'
 import { KnowledgeGraphView } from './KnowledgeGraphView'
+import { UpvoteButton } from './UpvoteButton'
+import { useUserAtom } from '@/hooks/useUserAtom'
+import { usePublicClient } from 'wagmi'
+import { JOB_POOL_ADDRESS, JOB_POOL_ABI } from '@/lib/jobPoolContract'
 
 // Component to display submission preview with multiple gateway fallbacks
 function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
@@ -253,6 +257,9 @@ interface JobDetailProps {
 export function JobDetail({ jobId, onBack }: JobDetailProps) {
   const { address, isConnected } = useAccount()
   const { getJob, acceptWork, cancelJob, isWriting, isConfirming } = useJobPool()
+  const publicClient = usePublicClient()
+  const { userAtomId } = useUserAtom()
+  const [jobAtomId, setJobAtomId] = useState<`0x${string}` | null>(null)
   
   const [job, setJob] = useState<(Job & { 
     jobId: bigint
@@ -278,6 +285,30 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
   useEffect(() => {
     loadJobData()
   }, [jobId])
+
+  // Fetch job atom ID
+  useEffect(() => {
+    const fetchJobAtomId = async () => {
+      if (!publicClient || !jobId) return
+
+      try {
+        const atomId = await publicClient.readContract({
+          address: JOB_POOL_ADDRESS as `0x${string}`,
+          abi: JOB_POOL_ABI,
+          functionName: 'jobAtomIds',
+          args: [jobId],
+        }) as `0x${string}`
+
+        if (atomId && atomId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+          setJobAtomId(atomId)
+        }
+      } catch (error) {
+        console.error('Error fetching job atom ID:', error)
+      }
+    }
+
+    fetchJobAtomId()
+  }, [publicClient, jobId])
 
   async function loadJobData() {
     try {

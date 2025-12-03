@@ -220,9 +220,15 @@ async function uploadFileToPinata(file: File): Promise<IPFSUploadResult> {
 
 /**
  * Get IPFS URL from CID
+ * Handles both raw CIDs and ipfs:// prefixed CIDs
  */
-export function getIPFSUrl(cid: string, gateway: string = 'w3s.link'): string {
-  return `https://${cid}.ipfs.${gateway}`
+export function getIPFSUrl(cid: string | null | undefined, gateway: string = 'w3s.link'): string {
+  if (!cid) {
+    return ''
+  }
+  // Remove ipfs:// prefix if present
+  const cleanCid = cid.replace(/^ipfs:\/\//, '').replace(/^\/ipfs\//, '')
+  return `https://${cleanCid}.ipfs.${gateway}`
 }
 
 /**

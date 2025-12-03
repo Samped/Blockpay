@@ -1,10 +1,13 @@
 /**
  * JobPool Contract ABI and utilities
  * Contract for BlockPay Job Pool System
- * Deployed: 0x8A21eAa3271d546471435804F2a1c90b80BD7B95
+ * Deployed: 0xA4Ff50De4BF072063cb76D6c67952fAD2412e918
  */
 
 import { parseUnits, formatUnits } from 'viem'
+
+// Contract address
+export const JOB_POOL_ADDRESS = process.env.NEXT_PUBLIC_JOB_POOL_ADDRESS || '0xA4Ff50De4BF072063cb76D6c67952fAD2412e918' as `0x${string}`
 
 // JobPool Contract ABI (matches deployed contract)
 export const JOB_POOL_ABI = [
@@ -14,13 +17,15 @@ export const JOB_POOL_ABI = [
     stateMutability: 'payable',
     inputs: [
       { name: '_deadline', type: 'uint256', internalType: 'uint256' },
+      { name: '_jobPayment', type: 'uint256', internalType: 'uint256' },
+      { name: '_jobMetaHash', type: 'string', internalType: 'string' },
     ],
     outputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
   },
   {
     name: 'submitWork',
     type: 'function',
-    stateMutability: 'nonpayable',
+    stateMutability: 'payable',
     inputs: [
       { name: '_jobId', type: 'uint256', internalType: 'uint256' },
       { name: '_submissionHash', type: 'bytes32', internalType: 'bytes32' },
@@ -30,9 +35,10 @@ export const JOB_POOL_ABI = [
   {
     name: 'acceptWork',
     type: 'function',
-    stateMutability: 'nonpayable',
+    stateMutability: 'payable',
     inputs: [
       { name: '_jobId', type: 'uint256', internalType: 'uint256' },
+      { name: '_submissionId', type: 'uint256', internalType: 'uint256' },
     ],
     outputs: [],
   },
@@ -49,6 +55,48 @@ export const JOB_POOL_ABI = [
     stateMutability: 'nonpayable',
     inputs: [{ name: '_jobId', type: 'uint256', internalType: 'uint256' }],
     outputs: [],
+  },
+  {
+    name: 'upvoteJob',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: '_jobId', type: 'uint256', internalType: 'uint256' },
+      { name: '_userAtomId', type: 'bytes32', internalType: 'bytes32' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'hasUpvoted',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: '', type: 'uint256', internalType: 'uint256' },
+      { name: '', type: 'address', internalType: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool', internalType: 'bool' }],
+  },
+  {
+    name: 'upvotedPredicate',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    name: 'jobs',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
+    outputs: [
+      { name: 'creator', type: 'address' },
+      { name: 'payment', type: 'uint256' },
+      { name: 'deadline', type: 'uint256' },
+      { name: 'status', type: 'uint8' },
+      { name: 'hasSubmission', type: 'bool' },
+      { name: 'worker', type: 'address' },
+      { name: 'submissionHash', type: 'bytes32' },
+    ],
   },
   {
     name: 'getJob',
@@ -94,11 +142,70 @@ export const JOB_POOL_ABI = [
     outputs: [{ name: '', type: 'bool', internalType: 'bool' }],
   },
   {
+    name: 'atomCreationFee',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
+  },
+  {
+    name: 'hasSubmissionPredicate',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    name: 'jobAtomIds',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
+    outputs: [{ name: '', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    name: 'submissionAtomIds',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: '', type: 'uint256', internalType: 'uint256' },
+      { name: '', type: 'uint256', internalType: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    name: 'paymentAtomIds',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: '', type: 'uint256', internalType: 'uint256' },
+      { name: '', type: 'uint256', internalType: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    name: 'getSubmissions',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '_jobId', type: 'uint256', internalType: 'uint256' }],
+    outputs: [
+      { name: 'workers', type: 'address[]', internalType: 'address[]' },
+      { name: 'submissionHashes', type: 'bytes32[]', internalType: 'bytes32[]' },
+      { name: 'accepted', type: 'bool[]', internalType: 'bool[]' },
+    ],
+  },
+  {
     name: 'isJobExpired',
     type: 'function',
     stateMutability: 'view',
     inputs: [{ name: '_jobId', type: 'uint256', internalType: 'uint256' }],
     outputs: [{ name: '', type: 'bool', internalType: 'bool' }],
+  },
+  {
+    name: 'getAvailableBalance',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
   },
   // Events
   {
@@ -158,6 +265,13 @@ export enum JobStatus {
   Expired = 3,
 }
 
+// Submission Status enum (for UI purposes - contract only has hasSubmission boolean)
+export enum SubmissionStatus {
+  Pending = 0,
+  Approved = 1,
+  Rejected = 2,
+}
+
 // Types
 export interface Job {
   creator: `0x${string}`
@@ -169,14 +283,27 @@ export interface Job {
   submissionHash: `0x${string}`
 }
 
+// Submission interface (for UI - contract stores minimal submission data)
+export interface Submission {
+  id: bigint
+  submitter: `0x${string}`
+  previewCID: string
+  status: SubmissionStatus
+  timestamp: bigint
+}
+
 /**
  * Convert IPFS CID string to bytes32 hash
  * For CIDv0 (Qm...), we can use the first 32 bytes
  * For CIDv1 (bafy...), we hash it
  */
 export function cidToBytes32(cid: string): `0x${string}` {
+  // Handle null/undefined safely
+  if (!cid) {
+    return `0x${'0'.repeat(64)}` as `0x${string}`
+  }
   // Remove ipfs:// prefix if present
-  const cleanCid = cid.replace(/^ipfs:\/\//, '')
+  const cleanCid = cid.toString().replace(/^ipfs:\/\//, '')
   
   // For CIDv0 (46 chars starting with Qm), take first 32 bytes
   if (cleanCid.length === 46 && cleanCid.startsWith('Qm')) {
