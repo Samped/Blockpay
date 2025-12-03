@@ -569,6 +569,17 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
               <span className="text-base font-semibold text-primary">
                 Budget: {formatTrustAmount(job.payment)} TRUST
               </span>
+              {jobAtomId && (
+                <UpvoteButton
+                  jobId={jobId}
+                  jobAtomId={jobAtomId}
+                  userAtomId={userAtomId}
+                  onUpvoteSuccess={() => {
+                    // Optionally reload data or show success message
+                    console.log('Upvote successful!')
+                  }}
+                />
+              )}
             </div>
           </div>
           {onBack && (
