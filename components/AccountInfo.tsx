@@ -135,7 +135,7 @@ export function AccountInfo({ accountInfo, onRefresh }: AccountInfoProps) {
                 } else if (atomData.email) {
                   const emailName = atomData.email.split('@')[0]
                   atomName = emailName.charAt(0).toUpperCase() + emailName.slice(1)
-                } else if (atomData.twitter) {
+                } else if (atomData.twitter && typeof atomData.twitter === 'string') {
                   atomName = atomData.twitter.replace('@', '')
                 } else if (atomData.github) {
                   atomName = atomData.github
@@ -186,7 +186,7 @@ export function AccountInfo({ accountInfo, onRefresh }: AccountInfoProps) {
                             <p>🌐 <a href={atomData.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.website}</a></p>
                           )}
                           {atomData.twitter && (
-                            <p>🐦 <a href={`https://twitter.com/${atomData.twitter.replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.twitter}</a></p>
+                            <p>🐦 <a href={`https://twitter.com/${(atomData.twitter || '').replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.twitter}</a></p>
                           )}
                           {atomData.github && (
                             <p>💻 <a href={`https://github.com/${atomData.github}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.github}</a></p>
