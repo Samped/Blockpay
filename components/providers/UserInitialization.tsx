@@ -19,7 +19,6 @@ import { createPortal } from 'react-dom'
 import { parseEther, toBytes, bytesToHex, keccak256, encodePacked, decodeErrorResult } from 'viem'
 
 import { intuitionClient, Atom as IntuitionAtom, createProfileAtom } from '@/lib/intuitionClient'
-import { AccountInfo } from '@/components/AccountInfo'
 import { INTUITION_CONTRACT_ABI, INTUITION_CONTRACT_ADDRESS, createAtomUri, atomDataToBytes } from '@/lib/intuitionContract'
 
 
@@ -1899,22 +1898,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         }
       })()}
 
-      {/* Display Account Information */}
-      {isConnected && address && (
-        <div className="fixed bottom-4 right-4 w-96 max-h-[80vh] overflow-y-auto bg-white rounded-lg shadow-xl border border-gray-200 z-[9998] p-4">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">Account Information</h3>
-          <AccountInfo 
-            accountInfo={accountInfo} 
-            onRefresh={async () => {
-              if (fetchAccountInfoRef.current) {
-                await fetchAccountInfoRef.current()
-              } else if (typeof window !== 'undefined' && (window as any).refreshAccountInfo) {
-                await (window as any).refreshAccountInfo()
-              }
-            }}
-          />
-        </div>
-      )}
+      {/* Account Information section removed */}
 
       {mounted && typeof window !== 'undefined' && document.body
         ? createPortal(modalContent, document.body)
