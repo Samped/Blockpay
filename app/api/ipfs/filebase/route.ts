@@ -65,13 +65,31 @@ export async function POST(request: NextRequest) {
     // 2) Image processing: compress + watermark if it's an image
     let finalBuffer = buffer
     if (mime.startsWith('image/')) {
-      finalBuffer = await compressAndWatermark(buffer, {
-        maxWidth: Number(process.env.IMAGE_MAX_WIDTH) || 2000,
-        maxHeight: Number(process.env.IMAGE_MAX_HEIGHT) || 2000,
-        quality: Number(process.env.IMAGE_QUALITY) || 80,
+      // For submission previews, use lower quality and smaller dimensions
+      const uploadType = formData.get('type') as string
+      const isSubmissionPreview = uploadType?.includes('submission')
+      
+      console.log(`[Upload] Image detected: type="${uploadType}", isSubmissionPreview=${isSubmissionPreview}`)
+      
+      const opts = {
+        maxWidth: isSubmissionPreview 
+          ? (Number(process.env.IMAGE_MAX_WIDTH) || 1200) // Lower for previews
+          : (Number(process.env.IMAGE_MAX_WIDTH) || 2000),
+        maxHeight: isSubmissionPreview
+          ? (Number(process.env.IMAGE_MAX_HEIGHT) || 1200) // Lower for previews
+          : (Number(process.env.IMAGE_MAX_HEIGHT) || 2000),
+        quality: isSubmissionPreview
+          ? (Number(process.env.IMAGE_QUALITY) || 55) // Lower quality for previews
+          : (Number(process.env.IMAGE_QUALITY) || 80),
         watermarkText: process.env.WATERMARK_TEXT || 'Blockpay – preview',
-        watermarkOpacity: Number(process.env.WATERMARK_OPACITY) || 0.35,
-      })
+        watermarkOpacity: Number(process.env.WATERMARK_OPACITY) || 0.6,
+      }
+      
+      console.log(`[Upload] Processing image with options:`, opts)
+      
+      finalBuffer = await compressAndWatermark(buffer, opts)
+      
+      console.log(`[Upload] ✅ Image processed: ${buffer.length} bytes → ${finalBuffer.length} bytes`)
     }
 
     // 3) Compute IPFS CID locally
