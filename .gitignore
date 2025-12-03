@@ -6,3 +6,5 @@
 dist/
 *.log
 docs/
+scripts/
+foundry.toml
