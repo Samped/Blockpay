@@ -15,7 +15,7 @@ const s3Client = new S3Client({
     accessKeyId: process.env.FILEBASE_ACCESS_KEY_ID || '',
     secretAccessKey: process.env.FILEBASE_SECRET_ACCESS_KEY || '',
   },
-  forcePathStyle: false,
+  forcePathStyle: true, // Use path-style URLs to avoid DNS issues with bucket name in domain
 })
 
 export async function uploadToFilebase(params: {
