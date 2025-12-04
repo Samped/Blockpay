@@ -76,7 +76,7 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
       }, 30000) // 30 second timeout
 
       try {
-        console.log('🔍 Fetching knowledge graph for job:', jobId.toString())
+        console.log('[INFO] Fetching knowledge graph for job:', jobId.toString())
         // 1. Get atom IDs from contract
         const jobAtomId = await publicClient.readContract({
           address: JOB_POOL_ADDRESS as `0x${string}`,
@@ -276,7 +276,7 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
 
         clearTimeout(timeoutId)
         setLoading(false)
-        console.log('✅ Knowledge graph loaded successfully')
+        console.log('[SUCCESS] Knowledge graph loaded successfully')
       } catch (err: any) {
         if (cancelled) return
         
@@ -338,11 +338,11 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
             <div className="flex flex-col items-center">
               <div className="flex items-center gap-2">
                 <div className="bg-blue-100 text-blue-800 px-4 py-2 rounded-lg font-semibold">
-                  📋 Job #{jobId.toString()}
+                  Job #{jobId.toString()}
                 </div>
                 {indexStatus[graphData.jobAtom.term_id.toLowerCase()] && (
                   <span className="text-green-600 text-xl" title="Indexed in Intuition GraphQL">
-                    ✅
+                    Indexed
                   </span>
                 )}
               </div>
@@ -369,11 +369,11 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
               <div key={atom.term_id} className="flex flex-col items-center">
                 <div className="flex items-center gap-2">
                   <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-semibold">
-                    ✏️ Submission #{idx + 1}
+                    Submission #{idx + 1}
                   </div>
                   {isIndexed && (
                     <span className="text-green-600 text-xl" title="Indexed in Intuition GraphQL">
-                      ✅
+                      Indexed
                     </span>
                   )}
                 </div>
@@ -389,11 +389,11 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
                     <div className="w-0.5 h-4 bg-gray-400 my-1"></div>
                     <div className="flex items-center gap-2">
                       <div className="bg-purple-100 text-purple-800 px-4 py-2 rounded-lg font-semibold">
-                        💰 Payment #{idx + 1}
+                        Payment #{idx + 1}
                       </div>
                       {indexStatus[graphData.paymentAtoms[idx].term_id.toLowerCase()] && (
                         <span className="text-green-600 text-xl" title="Indexed in Intuition GraphQL">
-                          ✅
+                          Indexed
                         </span>
                       )}
                     </div>
@@ -414,11 +414,11 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
         {graphData.jobAtom && (
           <div className="border border-gray-200 rounded-lg p-4">
             <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-              <span>📋</span>
+              <span>Job</span>
               <span>Job Atom</span>
               {indexStatus[graphData.jobAtom.term_id.toLowerCase()] && (
                 <span className="text-green-600 text-lg" title="Indexed in Intuition GraphQL">
-                  ✅ Indexed
+                  [SUCCESS] Indexed
                 </span>
               )}
             </h4>
@@ -458,11 +458,11 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
           return (
             <div key={atom.term_id} className="border border-gray-200 rounded-lg p-4">
               <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                <span>✏️</span>
+                <span>Submission</span>
                 <span>Submission Atom #{idx + 1}</span>
                 {isIndexed && (
                   <span className="text-green-600 text-lg" title="Indexed in Intuition GraphQL">
-                    ✅ Indexed
+                    Indexed Indexed
                   </span>
                 )}
               </h4>
@@ -503,11 +503,11 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
           return (
             <div key={atom.term_id} className="border border-gray-200 rounded-lg p-4">
               <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                <span>💰</span>
+                <span>Payment</span>
                 <span>Payment Atom #{idx + 1}</span>
                 {isIndexed && (
                   <span className="text-green-600 text-lg" title="Indexed in Intuition GraphQL">
-                    ✅ Indexed
+                    Indexed Indexed
                   </span>
                 )}
               </h4>
