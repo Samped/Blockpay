@@ -86,7 +86,7 @@ export class IntuitionClient {
         }
         
         if (result.errors) {
-          console.error('❌ GraphQL errors:', JSON.stringify(result.errors, null, 2))
+          console.error('[ERROR] GraphQL errors:', JSON.stringify(result.errors, null, 2))
           const errorMessages = result.errors.map((e: any) => e.message || JSON.stringify(e)).join(', ')
           throw new Error(`GraphQL errors: ${errorMessages}`)
         }
@@ -94,7 +94,7 @@ export class IntuitionClient {
         // Log successful responses for debugging
         if (result.data) {
           const dataKeys = Object.keys(result.data)
-          console.log('✅ GraphQL query successful. Returned keys:', dataKeys)
+          console.log('[SUCCESS] GraphQL query successful. Returned keys:', dataKeys)
           if (result.data.atoms) {
             console.log('   Atoms count:', result.data.atoms.length)
           }
@@ -171,14 +171,14 @@ export class IntuitionClient {
       const result = await this.graphqlQuery(mutation, variables)
       
       if (result?.pinThing?.uri) {
-        console.log('✅ Thing pinned to IPFS:', result.pinThing.uri)
+        console.log('[SUCCESS] Thing pinned to IPFS:', result.pinThing.uri)
         return result.pinThing.uri
       } else {
-        console.warn('⚠️ pinThing did not return URI:', result)
+        console.warn('[WARNING] pinThing did not return URI:', result)
         return null
       }
     } catch (error: any) {
-      console.error('❌ Error pinning thing:', error?.message || error)
+      console.error('[ERROR] Error pinning thing:', error?.message || error)
       return null
     }
   }
@@ -211,7 +211,7 @@ export class IntuitionClient {
           url: thingUrl,
         })
       } catch (pinError: any) {
-        console.warn('⚠️ pinThing failed, trying alternative IPFS upload:', pinError?.message)
+        console.warn('[WARNING] pinThing failed, trying alternative IPFS upload:', pinError?.message)
         // Fallback: try to upload to our own IPFS if pinThing fails
         // For now, we'll continue without IPFS URI and let createAtom handle it
       }
@@ -223,9 +223,9 @@ export class IntuitionClient {
           const { uploadToIPFS } = await import('./ipfs')
           const uploadResult = await uploadToIPFS(data)
           ipfsUri = `ipfs://${uploadResult.cid}`
-          console.log('✅ Uploaded to IPFS:', ipfsUri)
+          console.log('[SUCCESS] Uploaded to IPFS:', ipfsUri)
         } catch (uploadError: any) {
-          console.error('❌ IPFS upload failed:', uploadError?.message)
+          console.error('[ERROR] IPFS upload failed:', uploadError?.message)
           // Continue anyway - createAtom might accept data URI or other formats
         }
       }
@@ -234,12 +234,12 @@ export class IntuitionClient {
         // Last resort: create a data URI
         const jsonString = JSON.stringify(data)
         ipfsUri = `data:application/json,${encodeURIComponent(jsonString)}`
-        console.log('⚠️ Using data URI as fallback')
+        console.log('[WARNING] Using data URI as fallback')
       }
       
       // Step 2: Create atom on-chain using MultiVault contract
       // Note: createAtom GraphQL mutation doesn't exist - must use on-chain creation
-      console.log('📦 Step 2: Creating atom on-chain with URI:', ipfsUri)
+      console.log('[DATA] Step 2: Creating atom on-chain with URI:', ipfsUri)
       console.log('   Note: Using MultiVault contract (createAtom GraphQL mutation not available)')
       
       // For now, return the IPFS URI as the atom reference
@@ -250,9 +250,9 @@ export class IntuitionClient {
       // In a real implementation, this would be the atom ID from the on-chain transaction
       const atomId = `atom_${ipfsUri.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 64)}`
       
-      console.log('✅✅✅ Atom metadata uploaded to IPFS:', ipfsUri)
-      console.log('   ⚠️  On-chain atom creation requires MultiVault contract call')
-      console.log('   ⚠️  Set INDEXER_PRIVATE_KEY to enable on-chain atom creation')
+      console.log('[SUCCESS][SUCCESS][SUCCESS] Atom metadata uploaded to IPFS:', ipfsUri)
+      console.log('   [WARNING]  On-chain atom creation requires MultiVault contract call')
+      console.log('   [WARNING]  Set INDEXER_PRIVATE_KEY to enable on-chain atom creation')
       
       // Return atom with IPFS URI (actual atom ID would come from on-chain transaction)
       return {
@@ -263,7 +263,7 @@ export class IntuitionClient {
         createdAt: new Date().toISOString(),
       } as Atom
     } catch (error: any) {
-      console.error('❌ Error creating atom:', error?.message || error)
+      console.error('[ERROR] Error creating atom:', error?.message || error)
       return null
     }
   }
@@ -351,7 +351,7 @@ export class IntuitionClient {
       
       if (result?.createTriple?.id) {
         const triple = result.createTriple
-        console.log('✅✅✅ SUCCESS: Triple created:', triple.id)
+        console.log('[SUCCESS][SUCCESS][SUCCESS] SUCCESS: Triple created:', triple.id)
         return {
           id: triple.id,
           subject: triple.subject?.id || subjectId,
@@ -359,11 +359,11 @@ export class IntuitionClient {
           object: triple.object?.id || objectId,
         } as Triple
       } else {
-        console.warn('⚠️ createTriple did not return triple:', result)
+        console.warn('[WARNING] createTriple did not return triple:', result)
         return null
       }
     } catch (error: any) {
-      console.error('❌ Error creating triple:', error?.message || error)
+      console.error('[ERROR] Error creating triple:', error?.message || error)
       return null
     }
   }
@@ -473,10 +473,10 @@ export class IntuitionClient {
   async checkContractForAtoms(walletAddress: string, publicClient: any): Promise<string[]> {
     try {
       const addr = walletAddress.toLowerCase()
-      console.log('🔍 Checking contract for atoms created by:', addr)
+      console.log('[INFO] Checking contract for atoms created by:', addr)
 
       if (!publicClient) {
-        console.warn('⚠️ No public client available to check contract')
+        console.warn('[WARNING] No public client available to check contract')
         return []
       }
 
@@ -501,12 +501,12 @@ export class IntuitionClient {
 
         if (logs && logs.length > 0) {
           const atomIds = logs.map((log: any) => log.args.atomId)
-          console.log('✓ Found atoms in contract events:', atomIds.length)
+          console.log('[OK] Found atoms in contract events:', atomIds.length)
           return atomIds.map((id: any) => `0x${id.toString(16).padStart(64, '0')}`)
         }
       } catch (eventError: any) {
         // Event might not exist or have different signature
-        console.log('⚠️ Could not query events:', eventError.message)
+        console.log('[WARNING] Could not query events:', eventError.message)
       }
 
       // Alternative: Check transaction history
@@ -517,7 +517,7 @@ export class IntuitionClient {
         
         // Note: This is a simplified approach - in production you'd want to use an indexer
         // For now, we'll rely on GraphQL which should have indexed the transactions
-        console.log('ℹ️ Transaction history check would require an indexer')
+        console.log('[INFO] Transaction history check would require an indexer')
       } catch (txError) {
         console.warn('Could not check transaction history:', txError)
       }
@@ -536,7 +536,7 @@ export class IntuitionClient {
   async getUserProfileByAddress(walletAddress: string, publicClient?: any): Promise<Atom | null> {
     try {
       const addr = walletAddress.toLowerCase()
-      console.log('🔍 getUserProfileByAddress called for:', addr)
+      console.log('[INFO] getUserProfileByAddress called for:', addr)
       console.log('📡 GraphQL URL:', this.graphqlUrl)
 
       // First, try to check contract for atom IDs if publicClient is available
@@ -544,7 +544,7 @@ export class IntuitionClient {
       if (publicClient) {
         contractAtomIds = await this.checkContractForAtoms(addr, publicClient)
         if (contractAtomIds.length > 0) {
-          console.log('✓ Found atom IDs from contract:', contractAtomIds)
+          console.log('[OK] Found atom IDs from contract:', contractAtomIds)
           // Try to fetch these atoms by term_id
           for (const termId of contractAtomIds) {
             try {
@@ -565,7 +565,7 @@ export class IntuitionClient {
       `
               const data = await this.graphqlQuery(query, { termId })
               if (data?.atoms?.[0]) {
-                console.log('✓ Found atom by term_id from contract:', data.atoms[0].id)
+                console.log('[OK] Found atom by term_id from contract:', data.atoms[0].id)
                 return data.atoms[0] as Atom
               }
             } catch (termIdError) {
@@ -576,8 +576,10 @@ export class IntuitionClient {
       }
 
       // Strategy 1: Query by creator_id (most reliable for on-chain created atoms)
-      console.log('📡 Strategy 1: Querying by creator_id...')
+      // Note: We fetch more atoms and filter client-side because creator_id might be checksummed (mixed case)
+      console.log('📡 Strategy 1: Querying by creator_id (case-insensitive)...')
       try {
+        // First try exact match (in case it's already lowercase)
         const query1 = `
           query GetUserProfileByCreator($address: String!) {
             atoms(
@@ -597,11 +599,45 @@ export class IntuitionClient {
             }
           }
         `
-        const data1 = await this.graphqlQuery(query1, { address: addr })
-        console.log('📊 Strategy 1 results:', data1?.atoms?.length || 0, 'atoms found')
+        let data1 = await this.graphqlQuery(query1, { address: addr })
+        
+        // If no results, try fetching recent atoms and filtering client-side (case-insensitive)
+        if (!data1?.atoms || data1.atoms.length === 0) {
+          console.log('[INFO] Exact match found 0 atoms, trying case-insensitive search...')
+          const query1b = `
+            query GetRecentAtoms {
+              atoms(
+                limit: 200
+                order_by: { created_at: desc }
+              ) {
+                term_id
+                type
+                label
+                image
+                emoji
+                data
+                creator_id
+                created_at
+                block_number
+              }
+            }
+          `
+          const recentData = await this.graphqlQuery(query1b)
+          if (recentData?.atoms) {
+            // Filter by creator_id case-insensitively
+            data1 = {
+              atoms: recentData.atoms.filter((atom: any) => 
+                atom.creator_id?.toLowerCase() === addr
+              )
+            }
+            console.log('[INFO] Case-insensitive filter found', data1.atoms.length, 'atoms')
+          }
+        }
+        
+        console.log('[STATS] Strategy 1 results:', data1?.atoms?.length || 0, 'atoms found')
         
         if (data1?.atoms?.length > 0) {
-          console.log('📋 Sample atoms from Strategy 1:', data1.atoms.slice(0, 3).map((a: any) => {
+          console.log('[INFO] Sample atoms from Strategy 1:', data1.atoms.slice(0, 3).map((a: any) => {
             let parsedData = null
             try {
               parsedData = typeof a.data === 'string' ? JSON.parse(a.data) : (a.data || {})
@@ -670,7 +706,7 @@ export class IntuitionClient {
           
           // If still no match, use the most recent atom as the profile
           if (!userAtom && processedAtoms.length > 0) {
-            console.log('⚠️ No User type atom found, using most recent atom as profile')
+            console.log('[WARNING] No User type atom found, using most recent atom as profile')
             userAtom = processedAtoms[0]
           }
           
@@ -685,7 +721,7 @@ export class IntuitionClient {
               userAtom.id = userAtom.term_id
             }
             
-            console.log('✅ Found user atom via creator_id:', userAtom.term_id?.substring(0, 30) || userAtom.id?.substring(0, 30))
+            console.log('[SUCCESS] Found user atom via creator_id:', userAtom.term_id?.substring(0, 30) || userAtom.id?.substring(0, 30))
             console.log('   Atom type:', userAtom.type)
             console.log('   Has data:', !!userAtom.data)
             console.log('   Creator ID:', userAtom.creator_id?.substring(0, 20))
@@ -700,7 +736,7 @@ export class IntuitionClient {
           }
         }
       } catch (err1) {
-        console.warn('⚠️ Strategy 1 failed:', err1)
+        console.warn('[WARNING] Strategy 1 failed:', err1)
       }
 
       // Strategy 2: Query by type=User (simplified - data field filtering is complex in GraphQL)
@@ -731,7 +767,7 @@ export class IntuitionClient {
           }
         `
         const data2 = await this.graphqlQuery(query2, { address: addr })
-        console.log('📊 Strategy 2 results:', data2?.atoms?.length || 0, 'atoms found')
+        console.log('[STATS] Strategy 2 results:', data2?.atoms?.length || 0, 'atoms found')
         
         if (data2?.atoms?.length > 0) {
           // Find atom with matching address in data
@@ -753,17 +789,19 @@ export class IntuitionClient {
             if (!matchingAtom.id && matchingAtom.term_id) {
               matchingAtom.id = matchingAtom.term_id
             }
-            console.log('✅ Found user atom via type=User:', matchingAtom.term_id || matchingAtom.id)
+            console.log('[SUCCESS] Found user atom via type=User:', matchingAtom.term_id || matchingAtom.id)
             return matchingAtom as Atom
           }
         }
       } catch (err2) {
-        console.warn('⚠️ Strategy 2 failed:', err2)
+        console.warn('[WARNING] Strategy 2 failed:', err2)
       }
 
       // Strategy 3: Query ALL atoms by creator_id (no type filter) and filter client-side
-      console.log('📡 Strategy 3: Querying ALL atoms by creator_id (no type filter)...')
+      // Use case-insensitive search since creator_id might be checksummed
+      console.log('📡 Strategy 3: Querying ALL atoms by creator_id (case-insensitive)...')
       try {
+        // Try exact match first
         const query3 = `
           query GetAllAtomsByCreator($address: String!) {
             atoms(
@@ -783,42 +821,182 @@ export class IntuitionClient {
             }
           }
         `
-        const data3 = await this.graphqlQuery(query3, { address: addr })
-        console.log('📊 Strategy 3 results: Found', data3?.atoms?.length || 0, 'total atoms by creator')
+        let data3 = await this.graphqlQuery(query3, { address: addr })
+        
+        // If no results, fetch recent atoms and filter client-side
+        if (!data3?.atoms || data3.atoms.length === 0) {
+          console.log('[INFO] Strategy 3 exact match found 0, trying case-insensitive...')
+          const query3b = `
+            query GetRecentAtomsForCreator {
+              atoms(
+                limit: 300
+                order_by: { created_at: desc }
+              ) {
+                term_id
+                type
+                label
+                image
+                emoji
+                data
+                creator_id
+                created_at
+                block_number
+              }
+            }
+          `
+          const recentData = await this.graphqlQuery(query3b)
+          if (recentData?.atoms) {
+            data3 = {
+              atoms: recentData.atoms.filter((atom: any) => 
+                atom.creator_id?.toLowerCase() === addr
+              )
+            }
+            console.log('[INFO] Strategy 3 case-insensitive filter found', data3.atoms.length, 'atoms')
+          }
+        }
+        
+        console.log('[STATS] Strategy 3 results: Found', data3?.atoms?.length || 0, 'total atoms by creator')
         
         if (data3?.atoms?.length > 0) {
-          console.log('📋 All atoms by creator:', data3.atoms.map((a: any) => ({
+          console.log('[INFO] All atoms by creator:', data3.atoms.map((a: any) => ({
             id: a.id?.substring(0, 20),
             type: a.type,
             term_id: a.term_id?.substring(0, 20),
             has_data: !!a.data
           })))
           
-          // Try to find User type atom
-          let matchingAtom = data3.atoms.find((atom: any) => {
-            return atom.type === 'User'
+          // Process all atoms and score them based on profile data indicators
+          // This is more lenient than just checking type === 'User'
+          let matchingAtom: any = null
+          let bestAtom: any = null
+          let bestScore = 0
+          let bestParsedData: any = {}
+          
+          data3.atoms.forEach((atom: any) => {
+            // Parse atom data
+            let parsedData: any = {}
+            try {
+              if (typeof atom.data === 'string') {
+                const dataStr = atom.data.trim()
+                // Skip if it's just a type description like "json object"
+                if ((dataStr.toLowerCase() === 'json object' || dataStr === 'JsonObject') && dataStr.length < 50) {
+                  parsedData = {}
+                } else {
+                  try {
+                    parsedData = JSON.parse(atom.data)
+                  } catch (parseErr) {
+                    // If not valid JSON, might be a simple string
+                    if (atom.data.length > 0 && atom.data.length < 200) {
+                      parsedData = { value: atom.data }
+                    }
+                  }
+                }
+              } else if (atom.data && typeof atom.data === 'object') {
+                parsedData = atom.data
+              }
+            } catch (e) {
+              parsedData = {}
+            }
+            
+            // Check if this looks like a User profile
+            const hasName = !!(parsedData.name)
+            const hasBio = !!(parsedData.bio)
+            const hasEmail = !!(parsedData.email)
+            const hasSocial = !!(parsedData.twitter || parsedData.github || parsedData.behance || parsedData.dribbble)
+            const hasProfileData = hasName || hasBio || hasEmail || hasSocial
+            
+            // Type indicators
+            const isUserType = atom.type === 'User' || parsedData.type === 'User'
+            const hasAddress = !!(parsedData.address || parsedData.wallet)
+            
+            // Label indicators (skip "json object" labels)
+            const hasValidLabel = atom.label && 
+              !atom.label.toLowerCase().includes('json') && 
+              atom.label !== 'JsonObject' &&
+              atom.label.length > 0
+            
+            const isUserProfile = isUserType || hasAddress || hasProfileData || (hasValidLabel && hasProfileData)
+            
+            if (isUserProfile) {
+              // Score atoms based on how much profile data they have
+              let profileDataScore = [
+                parsedData.name,
+                parsedData.bio,
+                parsedData.email,
+                parsedData.twitter,
+                parsedData.github,
+                parsedData.website,
+                parsedData.behance,
+                parsedData.dribbble
+              ].filter(Boolean).length
+              
+              // Bonus points for User type or address match
+              if (isUserType) profileDataScore += 2
+              if (hasAddress && (parsedData.address?.toLowerCase() === addr || parsedData.wallet?.toLowerCase() === addr)) {
+                profileDataScore += 3
+              }
+              
+              if (profileDataScore > bestScore) {
+                bestAtom = atom
+                bestParsedData = parsedData
+                bestScore = profileDataScore
+              }
+            }
           })
           
-          // If no User type, try parsing data to find address match
-          if (!matchingAtom) {
+          // If we found a good match, use it
+          if (bestAtom && bestScore > 0) {
+            matchingAtom = bestAtom
+            // Update atom.data with parsed data
+            if (bestParsedData && typeof bestParsedData === 'object') {
+              matchingAtom.data = bestParsedData
+            }
+            console.log('[SUCCESS] Found best matching atom with score:', bestScore)
+          } else if (bestAtom) {
+            // Even if score is 0, if we found an atom that looks like a profile, use it
+            matchingAtom = bestAtom
+            if (bestParsedData && typeof bestParsedData === 'object') {
+              matchingAtom.data = bestParsedData
+            }
+            console.log('[WARNING] Using atom with score 0 (no profile data but matches profile criteria)')
+          } else {
+            // Try to find User type atom
             matchingAtom = data3.atoms.find((atom: any) => {
-              try {
-                const atomData = typeof atom.data === 'string' ? JSON.parse(atom.data) : (atom.data || {})
-                return (
-                  atomData.address?.toLowerCase() === addr ||
-                  atomData.wallet?.toLowerCase() === addr ||
-                  atomData.type === 'User'
-                )
-              } catch {
-                return false
-              }
+              return atom.type === 'User'
             })
-          }
-          
-          // If still no match, use the most recent atom
-          if (!matchingAtom && data3.atoms.length > 0) {
-            console.log('⚠️ No User type or address match found, using most recent atom')
-            matchingAtom = data3.atoms[0]
+            
+            // If no User type, try parsing data to find address match
+            if (!matchingAtom) {
+              matchingAtom = data3.atoms.find((atom: any) => {
+                try {
+                  const atomData = typeof atom.data === 'string' ? JSON.parse(atom.data) : (atom.data || {})
+                  return (
+                    atomData.address?.toLowerCase() === addr ||
+                    atomData.wallet?.toLowerCase() === addr ||
+                    atomData.type === 'User'
+                  )
+                } catch {
+                  return false
+                }
+              })
+            }
+            
+            // If still no match, use the most recent atom (any atom created by this user is better than nothing)
+            if (!matchingAtom && data3.atoms.length > 0) {
+              console.log('[WARNING] No User type or address match found, using most recent atom as fallback')
+              matchingAtom = data3.atoms[0]
+              // Try to parse its data
+              try {
+                if (typeof matchingAtom.data === 'string') {
+                  const dataStr = matchingAtom.data.trim()
+                  if (!(dataStr.toLowerCase() === 'json object' || dataStr === 'JsonObject') || dataStr.length >= 50) {
+                    try {
+                      matchingAtom.data = JSON.parse(matchingAtom.data)
+                    } catch {}
+                  }
+                }
+              } catch {}
+            }
           }
 
         if (matchingAtom) {
@@ -826,16 +1004,16 @@ export class IntuitionClient {
             if (!matchingAtom.id && matchingAtom.term_id) {
               matchingAtom.id = matchingAtom.term_id
             }
-            console.log('✅ Found user atom via broad search:', matchingAtom.term_id || matchingAtom.id)
+            console.log('[SUCCESS] Found user atom via broad search:', matchingAtom.term_id || matchingAtom.id)
             console.log('   Creator ID:', matchingAtom.creator_id)
             console.log('   Atom type:', matchingAtom.type)
             return matchingAtom as Atom
           } else {
-            console.log('⚠️ No matching atom found in', data3.atoms.length, 'atoms')
+            console.log('[WARNING] No matching atom found in', data3.atoms.length, 'atoms')
           }
         }
       } catch (err3) {
-        console.warn('⚠️ Strategy 3 failed:', err3)
+        console.warn('[WARNING] Strategy 3 failed:', err3)
       }
 
       // Strategy 4: Try REST API to get all User atoms and filter
@@ -844,7 +1022,7 @@ export class IntuitionClient {
         const response = await fetch(`${this.graphUrl}/atoms?type=User&limit=100`)
         if (response.ok) {
           const atoms = await response.json()
-          console.log('📊 REST API returned:', Array.isArray(atoms) ? atoms.length : 0, 'atoms')
+          console.log('[STATS] REST API returned:', Array.isArray(atoms) ? atoms.length : 0, 'atoms')
           if (Array.isArray(atoms)) {
             const matchingAtom = atoms.find((atom: Atom) => {
               const atomData = atom.data || {}
@@ -859,15 +1037,15 @@ export class IntuitionClient {
               if (!matchingAtom.id && matchingAtom.term_id) {
                 matchingAtom.id = matchingAtom.term_id
               }
-              console.log('✅ Found user atom via REST API:', matchingAtom.term_id || matchingAtom.id)
+              console.log('[SUCCESS] Found user atom via REST API:', matchingAtom.term_id || matchingAtom.id)
               return matchingAtom
             }
           }
         } else {
-          console.warn('⚠️ REST API returned status:', response.status)
+          console.warn('[WARNING] REST API returned status:', response.status)
         }
       } catch (restError) {
-        console.warn('⚠️ REST API fallback failed:', restError)
+        console.warn('[WARNING] REST API fallback failed:', restError)
       }
 
       // Strategy 5: Diagnostic - Query recent atoms and filter by creator_id
@@ -888,7 +1066,7 @@ export class IntuitionClient {
           }
         `
         const diagnosticData = await this.graphqlQuery(diagnosticQuery)
-        console.log('📊 Diagnostic: Found', diagnosticData?.atoms?.length || 0, 'recent atoms')
+        console.log('[STATS] Diagnostic: Found', diagnosticData?.atoms?.length || 0, 'recent atoms')
         
         if (diagnosticData?.atoms?.length > 0) {
           // Filter by creator_id
@@ -896,7 +1074,7 @@ export class IntuitionClient {
             return atom.creator_id?.toLowerCase() === addr
           })
           
-          console.log('📊 Diagnostic: Found', myAtoms.length, 'atoms created by', addr.substring(0, 10) + '...')
+          console.log('[STATS] Diagnostic: Found', myAtoms.length, 'atoms created by', addr.substring(0, 10) + '...')
           
           if (myAtoms.length > 0) {
             // Process atoms to find the best match
@@ -940,17 +1118,17 @@ export class IntuitionClient {
               if (!matchingAtom.id && matchingAtom.term_id) {
                 matchingAtom.id = matchingAtom.term_id
               }
-              console.log('✅✅✅ Found user atom via diagnostic query!', matchingAtom.term_id?.substring(0, 30))
+              console.log('[SUCCESS][SUCCESS][SUCCESS] Found user atom via diagnostic query!', matchingAtom.term_id?.substring(0, 30))
               return matchingAtom as Atom
             }
           }
         }
       } catch (diagError) {
-        console.warn('⚠️ Diagnostic query failed:', diagError)
+        console.warn('[WARNING] Diagnostic query failed:', diagError)
       }
 
-      console.log('❌ No user atom found after trying all strategies')
-      console.log('💡 Possible reasons:')
+      console.log('[ERROR] No user atom found after trying all strategies')
+      console.log('[NOTE] Possible reasons:')
       console.log('   1. Atom was just created and GraphQL hasn\'t indexed it yet')
       console.log('   2. Atom was created with different data structure')
       console.log('   3. Address mismatch in atom data')
@@ -974,13 +1152,13 @@ export class IntuitionClient {
 
       // GraphQL API only has pinOrganization, pinPerson, pinThing mutations
       // No direct atom creation mutations - must use REST API
-      console.log('ℹ️ GraphQL API is read-only for atom creation')
+      console.log('[INFO] GraphQL API is read-only for atom creation')
       console.log('→ Using REST API via Next.js proxy route to create atom...')
       
       const atom = await this.createAtom('User', data)
       
       if (atom && atom.id) {
-        console.log('✓✓✓ Atom created via REST API:', atom.id)
+        console.log('[OK][OK][OK] Atom created via REST API:', atom.id)
         // Create a triple linking the address to the atom (if supported)
         try {
           await this.createTriple(atom.id, 'has_wallet', addr)
@@ -991,7 +1169,7 @@ export class IntuitionClient {
         return atom
       }
 
-      console.error('❌ All atom creation methods failed - GraphQL and REST both returned null')
+      console.error('[ERROR] All atom creation methods failed - GraphQL and REST both returned null')
       console.error('No network request succeeded. Check API endpoints and network connection.')
       return null
     } catch (error) {
@@ -1074,11 +1252,11 @@ export class IntuitionClient {
     profileData: Record<string, any>
   }> {
     try {
-      console.log('🔍 getUserProfileData called for:', walletAddress)
+      console.log('[INFO] getUserProfileData called for:', walletAddress)
       const userAtom = await this.getUserProfileByAddress(walletAddress, publicClient)
       
       if (!userAtom) {
-        console.log('❌ No atom found in getUserProfileData')
+        console.log('[ERROR] No atom found in getUserProfileData')
         return {
           atom: null,
           trustScore: null,
@@ -1088,7 +1266,7 @@ export class IntuitionClient {
         }
       }
 
-      console.log('✅ Atom found in getUserProfileData:', {
+      console.log('[SUCCESS] Atom found in getUserProfileData:', {
         id: userAtom.id?.substring(0, 30),
         type: userAtom.type,
         has_data: !!userAtom.data,
@@ -1101,18 +1279,18 @@ export class IntuitionClient {
         if (typeof userAtom.data === 'string') {
           try {
             profileData = JSON.parse(userAtom.data)
-            console.log('✓ Parsed atom data from string')
+            console.log('[OK] Parsed atom data from string')
           } catch (e) {
             console.warn('Could not parse atom data as JSON:', e)
             profileData = {}
           }
         } else if (typeof userAtom.data === 'object') {
           profileData = userAtom.data
-          console.log('✓ Using atom data as object')
+          console.log('[OK] Using atom data as object')
         }
       }
       
-      console.log('📊 Profile data extracted:', {
+      console.log('[STATS] Profile data extracted:', {
         keys: Object.keys(profileData),
         has_name: !!profileData.name,
         has_bio: !!profileData.bio,
@@ -1148,7 +1326,7 @@ export class IntuitionClient {
         console.warn('Could not fetch created artworks:', e)
       }
 
-      console.log('✅ Returning profile data:', {
+      console.log('[SUCCESS] Returning profile data:', {
         hasAtom: true,
         hasTrustScore: !!trustScore,
         completedJobs,
@@ -1164,7 +1342,7 @@ export class IntuitionClient {
         profileData,
       }
     } catch (error) {
-      console.error('❌ Error fetching user profile data:', error)
+      console.error('[ERROR] Error fetching user profile data:', error)
       return {
         atom: null,
         trustScore: null,
@@ -1235,11 +1413,11 @@ export async function createProfileAtom({
       account: account
     })
 
-    console.log('✅ Transaction sent:', txHash)
+    console.log('[SUCCESS] Transaction sent:', txHash)
 
     return { success: true, txHash }
   } catch (error: any) {
-    console.error('❌ Error creating profile atom:', error)
+    console.error('[ERROR] Error creating profile atom:', error)
     return { 
       success: false, 
       error: error.message || 'Unknown error',
