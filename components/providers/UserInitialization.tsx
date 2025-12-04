@@ -75,6 +75,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
   const [isInitializing, setIsInitializing] = useState(true) // Start as true to show loading state
 
   const [showModal, setShowModal] = useState(false)
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false)
 
   const [userAtom, setUserAtom] = useState<Atom | null>(null)
   
@@ -179,130 +180,276 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         setProfileCheckComplete(false) // Mark as not complete yet
         setError(null)
         setShowModal(false) // Don't show modal until check is complete
+        setShowWelcomeModal(false) // Don't show welcome modal until check is complete
 
 
 
-        // Query Knowledge Graph for existing user atom
-        // Check both by creator_id (atoms created by this address) and by data field
-        const query = `
+        // Use the same reliable method as useUserAtom hook
+        let existingAtom = await intuitionClient.getUserProfileByAddress(address, publicClient || undefined)
 
-          query GetUserAtom($address: String!) {
-
-            atoms(
-
-              where: {
-
-                _or: [
-
-                  { creator_id: { _eq: $address } }
-
-                  {
-
-                    _and: [
-
-                      { type: { _eq: "User" } }
-
-                      { 
-
-                        _or: [
-
-                          { data: { _contains: { address: $address } } }
-
-                          { data: { _contains: { wallet: $address } } }
-
-                        ]
-
-                      }
-
-                    ]
-
-                  }
-
-                ]
-
+        // If getUserProfileByAddress didn't find anything, try a direct GraphQL query as fallback
+        if (!existingAtom || (!existingAtom.term_id && !existingAtom.id)) {
+          console.log('[WARNING] getUserProfileByAddress returned null, trying direct GraphQL query...')
+          
+          try {
+            // Try exact match first
+            const directQuery = `
+              query CheckAtoms($address: String!) {
+                atoms(
+                  where: { creator_id: { _eq: $address } }
+                  limit: 50
+                  order_by: { created_at: desc }
+                ) {
+                  term_id
+                  type
+                  label
+                  emoji
+                  image
+                  data
+                  created_at
+                  creator_id
+                }
               }
-
-              limit: 1
-
-              order_by: { created_at: desc }
-
-            ) {
-
-              id
-
-              term_id
-
-              type
-
-              label
-
-              image
-
-              emoji
-
-              data
-
-              creator_id
-
-              created_at
-
+            `
+            let response = await fetch('https://testnet.intuition.sh/v1/graphql', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                query: directQuery,
+                variables: { address: address.toLowerCase() }
+              })
+            })
+            let result = await response.json()
+            
+            // If no results, try fetching recent atoms and filtering client-side (case-insensitive)
+            if (!result.data?.atoms || result.data.atoms.length === 0) {
+              console.log('[INFO] Exact match found 0 atoms, trying case-insensitive search...')
+              const recentQuery = `
+                query GetRecentAtoms {
+                  atoms(
+                    limit: 300
+                    order_by: { created_at: desc }
+                  ) {
+                    term_id
+                    type
+                    label
+                    emoji
+                    image
+                    data
+                    created_at
+                    creator_id
+                  }
+                }
+              `
+              response = await fetch('https://testnet.intuition.sh/v1/graphql', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  query: recentQuery
+                })
+              })
+              const recentResult = await response.json()
+              
+              if (recentResult.data?.atoms) {
+                // Filter by creator_id case-insensitively
+                result = {
+                  data: {
+                    atoms: recentResult.data.atoms.filter((atom: any) => 
+                      atom.creator_id?.toLowerCase() === address.toLowerCase()
+                    )
+                  }
+                }
+                console.log('[SUCCESS] Case-insensitive filter found', result.data.atoms.length, 'atoms')
+              }
             }
-
+            
+            if (result.data?.atoms?.length > 0) {
+              console.log('[SUCCESS] Direct query found', result.data.atoms.length, 'atoms')
+              
+              // Find the best matching User profile atom (same logic as UserProfile.tsx)
+              let bestAtom: any = null
+              let bestParsedData: any = {}
+              let bestScore = 0
+              
+              result.data.atoms.forEach((atom: any) => {
+                let parsedData: any = {}
+                try {
+                  if (typeof atom.data === 'string') {
+                    const dataStr = atom.data.trim()
+                    // Skip if it's just a type description like "json object"
+                    if ((dataStr.toLowerCase() === 'json object' || dataStr === 'JsonObject') && dataStr.length < 50) {
+                      parsedData = {}
+                    } else {
+                      try {
+                        parsedData = JSON.parse(atom.data)
+                      } catch (parseErr) {
+                        // If not valid JSON, might be a simple string
+                        if (atom.data.length > 0 && atom.data.length < 200) {
+                          parsedData = { value: atom.data }
+                        }
+                      }
+                    }
+                  } else if (atom.data && typeof atom.data === 'object') {
+                    parsedData = atom.data
+                  }
+                } catch (e) {
+                  parsedData = {}
+                }
+                
+                // Check if this looks like a User profile
+                const hasName = !!(parsedData.name)
+                const hasBio = !!(parsedData.bio)
+                const hasEmail = !!(parsedData.email)
+                const hasSocial = !!(parsedData.twitter || parsedData.github || parsedData.behance || parsedData.dribbble)
+                const hasProfileData = hasName || hasBio || hasEmail || hasSocial
+                const isUserType = atom.type === 'User' || parsedData.type === 'User'
+                const hasAddress = !!(parsedData.address || parsedData.wallet)
+                const hasValidLabel = atom.label && 
+                  !atom.label.toLowerCase().includes('json') && 
+                  atom.label !== 'JsonObject' &&
+                  atom.label.length > 0
+                const isUserProfile = isUserType || hasAddress || hasProfileData || (hasValidLabel && hasProfileData)
+                
+                if (isUserProfile) {
+                  let profileDataScore = [
+                    parsedData.name,
+                    parsedData.bio,
+                    parsedData.email,
+                    parsedData.twitter,
+                    parsedData.github,
+                    parsedData.website,
+                    parsedData.behance,
+                    parsedData.dribbble
+                  ].filter(Boolean).length
+                  
+                  if (isUserType) profileDataScore += 2
+                  if (hasAddress && (parsedData.address?.toLowerCase() === address.toLowerCase() || parsedData.wallet?.toLowerCase() === address.toLowerCase())) {
+                    profileDataScore += 3
+                  }
+                  
+                  if (profileDataScore > bestScore) {
+                    bestAtom = atom
+                    bestParsedData = parsedData
+                    bestScore = profileDataScore
+                  }
+                }
+              })
+              
+              // Use best atom if found, otherwise use first atom
+              if (bestAtom) {
+                existingAtom = {
+                  ...bestAtom,
+                  id: bestAtom.term_id,
+                  term_id: bestAtom.term_id,
+                  data: bestParsedData,
+                  type: bestAtom.type || bestParsedData.type || 'User'
+                }
+                console.log('[SUCCESS] Found atom via direct query fallback, score:', bestScore)
+              } else if (result.data.atoms.length > 0) {
+                // Use first atom as fallback
+                const firstAtom = result.data.atoms[0]
+                let firstParsedData: any = {}
+                try {
+                  if (typeof firstAtom.data === 'string') {
+                    const dataStr = firstAtom.data.trim()
+                    // Skip if it's just a type description like "json object"
+                    if ((dataStr.toLowerCase() === 'json object' || dataStr === 'JsonObject') && dataStr.length < 50) {
+                      firstParsedData = {}
+                    } else {
+                      try {
+                        firstParsedData = JSON.parse(firstAtom.data)
+                      } catch (parseErr) {
+                        // If not valid JSON, might be a simple string
+                        if (firstAtom.data.length > 0 && firstAtom.data.length < 200) {
+                          firstParsedData = { value: firstAtom.data }
+                        }
+                      }
+                    }
+                  } else if (firstAtom.data && typeof firstAtom.data === 'object') {
+                    firstParsedData = firstAtom.data
+                  }
+                } catch {}
+                
+                existingAtom = {
+                  ...firstAtom,
+                  id: firstAtom.term_id,
+                  term_id: firstAtom.term_id,
+                  data: firstParsedData,
+                  type: firstAtom.type || firstParsedData.type || 'User'
+                }
+                console.log('[WARNING] Using first atom as fallback (no high-scoring profile found)')
+              }
+            } else {
+              console.log('[INFO] Direct query also found 0 atoms')
+            }
+          } catch (fallbackError) {
+            console.error('[ERROR] Direct GraphQL fallback failed:', fallbackError)
           }
-
-        `
-
-
-
-        const response = await fetch(KNOWLEDGE_GRAPH_URL, {
-
-          method: 'POST',
-
-          headers: { 'Content-Type': 'application/json' },
-
-          body: JSON.stringify({
-
-            query,
-
-            variables: { address: address.toLowerCase() }
-
-          })
-
-        })
-
-
-
-        const result = await response.json()
-
-
-
-        if (result.errors) {
-
-          console.warn('GraphQL errors:', result.errors)
-
-          setUserAtom(null)
-
-          // Only show modal after check is complete
-          setProfileCheckComplete(true)
-          setIsInitializing(false)
-          // Don't auto-show modal on error - let user manually trigger it
-          setShowModal(false)
-
-          return
-
         }
 
+        // Check if atom actually exists and has required properties
+        // Accept ANY atom object - even if it doesn't have term_id/id, if it exists, use it
+        const hasValidAtom = existingAtom && (
+          existingAtom.term_id || 
+          existingAtom.id ||
+          (existingAtom as any).creator_id || // Some atoms might only have creator_id
+          (existingAtom as any).term_id || // Try term_id from any property
+          Object.keys(existingAtom).length > 0 // If it's any non-empty object, accept it
+        )
+        
+        // Additional check: if atom has creator_id, verify it matches the address
+        if (hasValidAtom && (existingAtom as any).creator_id) {
+          const creatorId = (existingAtom as any).creator_id.toLowerCase()
+          const addressLower = address.toLowerCase()
+          if (creatorId !== addressLower) {
+            console.warn('[WARNING] Atom creator_id does not match address:', {
+              creatorId: creatorId.substring(0, 20),
+              address: addressLower.substring(0, 20)
+            })
+            // Still consider it valid if it's close (might be case sensitivity or formatting)
+          }
+        }
+        
+        console.log('[DEBUG] Atom check result:', {
+          hasExistingAtom: !!existingAtom,
+          hasTermId: !!existingAtom?.term_id,
+          hasId: !!existingAtom?.id,
+          termId: existingAtom?.term_id?.substring(0, 30),
+          id: existingAtom?.id?.substring(0, 30),
+          type: existingAtom?.type,
+          hasData: !!existingAtom?.data,
+          hasValidAtom
+        })
 
+        if (hasValidAtom) {
 
-        const existingAtom = result.data?.atoms?.[0]
+          console.log('[OK] User atom exists:', existingAtom.term_id || existingAtom.id || (existingAtom as any).creator_id || 'unknown')
+          console.log('[DEBUG] Atom details:', {
+            term_id: existingAtom.term_id,
+            id: existingAtom.id,
+            type: existingAtom.type,
+            label: existingAtom.label,
+            dataKeys: existingAtom.data ? Object.keys(existingAtom.data) : [],
+            creator_id: (existingAtom as any).creator_id,
+            allKeys: Object.keys(existingAtom)
+          })
 
-
-
-        if (existingAtom) {
-
-          console.log('✓ User atom exists:', existingAtom.term_id || existingAtom.id)
-
+          // Ensure atom has required structure
+          if (!existingAtom.term_id && !existingAtom.id && (existingAtom as any).term_id) {
+            existingAtom.id = (existingAtom as any).term_id
+            existingAtom.term_id = (existingAtom as any).term_id
+          }
+          
+          console.log('[DEBUG] Setting userAtom state with:', {
+            hasTermId: !!existingAtom.term_id,
+            hasId: !!existingAtom.id,
+            hasData: !!existingAtom.data,
+            type: existingAtom.type
+          })
+          
           setUserAtom(existingAtom)
+          
+          console.log('[SUCCESS] userAtom state has been set!')
 
           
 
@@ -334,31 +481,31 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
           
 
-          console.log('✅ Profile exists - showing welcome message')
+          console.log('[SUCCESS] Profile exists - showing welcome message')
 
-          // Profile exists - DO NOT show modal
+          // Profile exists - show welcome modal, not creation modal
           setShowModal(false)
+          setShowWelcomeModal(true)
           setProfileCheckComplete(true)
+          setIsInitializing(false)
           initializedAddressRef.current = address.toLowerCase()
 
         } else {
 
-          console.log('✗ No user atom found')
+          console.log('[FAIL] No user atom found')
 
-          console.log('✓ User needs to create profile - will show creation form')
+          console.log('[OK] User needs to create profile - will show creation form')
 
           setUserAtom(null)
 
           // Mark check as complete, then show modal
           setProfileCheckComplete(true)
+          setIsInitializing(false)
           // Auto-show modal ONLY after check confirms no profile exists
           setShowModal(true)
+          console.log('[NOTIFY] Setting showModal to true - modal should appear now')
 
         }
-
-
-
-        setIsInitializing(false)
 
 
 
@@ -509,7 +656,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         ])
 
         // Debug: Log raw GraphQL responses
-        console.log('🔍 Raw GraphQL Response for Account Atoms:')
+        console.log('[INFO] Raw GraphQL Response for Account Atoms:')
         console.log('  Status:', atomsRes.status)
         console.log('  Response:', atomsData)
         if (atomsData.errors) {
@@ -524,9 +671,9 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         const recentAtoms = recentData.data?.atoms || []
         const triples = triplesData.data?.triples || []
 
-        console.log('✓ Account atoms query result:', atoms.length)
-        console.log('✓ Recent atoms:', recentAtoms.length)
-        console.log('✓ Account triples:', triples.length)
+        console.log('[OK] Account atoms query result:', atoms.length)
+        console.log('[OK] Recent atoms:', recentAtoms.length)
+        console.log('[OK] Account triples:', triples.length)
         
         // Process atoms to normalize their structure (parse JSON data, set type, etc.)
         atoms = atoms.map((atom: any) => {
@@ -535,7 +682,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
           if (typeof atom.data === 'string') {
             try {
               parsedData = JSON.parse(atom.data)
-              console.log('✓ Parsed atom data from string for atom:', atom.id?.substring(0, 20))
+              console.log('[OK] Parsed atom data from string for atom:', atom.id?.substring(0, 20))
             } catch (e) {
               console.warn('Could not parse atom data as JSON:', e)
               parsedData = {}
@@ -546,11 +693,11 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
           if (!atom.type && parsedData && typeof parsedData === 'object') {
             if (parsedData.type) {
               atom.type = parsedData.type
-              console.log('✓ Set atom type from data:', parsedData.type)
+              console.log('[OK] Set atom type from data:', parsedData.type)
             } else if (parsedData.address || parsedData.wallet) {
               // If data has address/wallet, treat as User profile
               atom.type = 'User'
-              console.log('✓ Set atom type to "User" based on address in data')
+              console.log('[OK] Set atom type to "User" based on address in data')
             }
           }
           
@@ -577,7 +724,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         
         // Log sample atoms for debugging
         if (atoms.length > 0) {
-          console.log('📊 Sample account atoms (after processing):', atoms.slice(0, 3).map((a: any) => ({
+          console.log('[STATS] Sample account atoms (after processing):', atoms.slice(0, 3).map((a: any) => ({
             term_id: a.term_id?.substring(0, 20),
             id: a.id?.substring(0, 20),
             type: a.type,
@@ -594,7 +741,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
             return creatorId?.toLowerCase() === address.toLowerCase()
           })
           if (myAtoms.length > 0) {
-            console.log('⚠️ Account query found 0 atoms, but recent atoms shows', myAtoms.length, 'atoms from this address')
+            console.log('[WARNING] Account query found 0 atoms, but recent atoms shows', myAtoms.length, 'atoms from this address')
             console.log('   Sample recent atoms:', myAtoms.slice(0, 2).map((a: any) => ({
               id: a.id?.substring(0, 20),
               type: a.type,
@@ -635,7 +782,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         }
         
         // Log what we're actually setting
-        console.log('📦 Final atoms array length:', atoms.length)
+        console.log('[DATA] Final atoms array length:', atoms.length)
         if (atoms.length > 0) {
           console.log('   First atom:', {
             term_id: atoms[0].term_id?.substring(0, 30),
@@ -645,7 +792,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
             data_keys: atoms[0].data ? Object.keys(atoms[0].data).slice(0, 5) : []
           })
         } else {
-          console.log('⚠️ No atoms found after all processing. Check GraphQL query response.')
+          console.log('[WARNING] No atoms found after all processing. Check GraphQL query response.')
           if (atomsData.errors) {
             console.error('GraphQL errors:', atomsData.errors)
           }
@@ -654,7 +801,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
           }
           
           // Try a simpler diagnostic query to see if ANY atoms exist for this creator
-          console.log('🔍 Running diagnostic query to check for atoms...')
+          console.log('[INFO] Running diagnostic query to check for atoms...')
           console.log('   Querying address:', address.toLowerCase())
           console.log('   GraphQL URL:', KNOWLEDGE_GRAPH_URL)
           
@@ -674,7 +821,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
                 }
               }
             `
-            console.log('🔍 Step 1: Querying ALL recent atoms...')
+            console.log('[INFO] Step 1: Querying ALL recent atoms...')
             const allAtomsRes = await fetch(KNOWLEDGE_GRAPH_URL, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -683,7 +830,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
               })
             })
             const allAtomsData = await allAtomsRes.json()
-            console.log('🔍 All atoms query result:', {
+            console.log('[INFO] All atoms query result:', {
               status: allAtomsRes.status,
               totalAtoms: allAtomsData.data?.atoms?.length || 0,
               hasErrors: !!allAtomsData.errors,
@@ -697,7 +844,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
                 const myAddress = address.toLowerCase()
                 const matches = creatorId === myAddress
                 if (matches) {
-                  console.log('   ✓ Found matching atom:', {
+                  console.log('   [OK] Found matching atom:', {
                     term_id: atom.term_id?.substring(0, 30),
                     creator_id: atom.creator_id?.substring(0, 20),
                     type: atom.type
@@ -706,14 +853,14 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
                 return matches
               })
               
-              console.log('🔍 Filtered atoms by creator_id:', {
+              console.log('[INFO] Filtered atoms by creator_id:', {
                 totalAtoms: allAtomsData.data.atoms.length,
                 myAtoms: myAtomsFromAll.length,
                 myAddress: address.toLowerCase()
               })
               
               if (myAtomsFromAll.length > 0) {
-                console.log('✅ Found', myAtomsFromAll.length, 'atoms by filtering all atoms!')
+                console.log('[SUCCESS] Found', myAtomsFromAll.length, 'atoms by filtering all atoms!')
                 atoms = myAtomsFromAll.map((atom: any) => {
                   let parsedData = atom.data
                   if (typeof atom.data === 'string') {
@@ -742,7 +889,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
                   
                   return atom
                 })
-                console.log('✅ Processed', atoms.length, 'atoms from all atoms query')
+                console.log('[SUCCESS] Processed', atoms.length, 'atoms from all atoms query')
               }
             }
             
@@ -761,7 +908,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
                 }
               }
             `
-            console.log('🔍 Step 2: Querying by creator_id filter...')
+            console.log('[INFO] Step 2: Querying by creator_id filter...')
             const diagRes = await fetch(KNOWLEDGE_GRAPH_URL, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -771,7 +918,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
               })
             })
             const diagData = await diagRes.json()
-            console.log('🔍 Diagnostic query result:', {
+            console.log('[INFO] Diagnostic query result:', {
               status: diagRes.status,
               hasErrors: !!diagData.errors,
               errors: diagData.errors,
@@ -786,7 +933,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
             
             // If diagnostic query finds atoms and we don't have any yet, use them
             if (atoms.length === 0 && diagData.data?.atoms?.length > 0) {
-              console.log('✅ Diagnostic query found atoms! Processing them...')
+              console.log('[SUCCESS] Diagnostic query found atoms! Processing them...')
               atoms = diagData.data.atoms.map((atom: any) => {
                 let parsedData = atom.data
                 if (typeof atom.data === 'string') {
@@ -815,7 +962,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
                 
                 return atom
               })
-              console.log('✅ Processed', atoms.length, 'atoms from diagnostic query')
+              console.log('[SUCCESS] Processed', atoms.length, 'atoms from diagnostic query')
             }
           } catch (diagError) {
             console.error('Diagnostic query failed:', diagError)
@@ -834,7 +981,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         // If no atoms and no triples found, check if we should show Create Profile modal
         // Only show if userAtom is null (no profile exists yet)
         if (atoms.length === 0 && triples.length === 0 && !userAtom) {
-          console.log('⚠️ No atoms or triples found - user needs to create profile')
+          console.log('[WARNING] No atoms or triples found - user needs to create profile')
           // Don't auto-show modal - let user navigate to dashboard or manually trigger creation
           // Modal will be shown when user explicitly wants to create profile
         }
@@ -850,7 +997,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         
         // If error and no user atom exists, log but don't auto-show modal
         if (!userAtom) {
-          console.log('⚠️ Error fetching account info - user may need to create profile')
+          console.log('[WARNING] Error fetching account info - user may need to create profile')
           // Don't auto-show modal - let user navigate to dashboard
         }
       }
@@ -873,7 +1020,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
     if (isConfirmed && hash) {
 
-      console.log('✅ Atom creation confirmed! Tx:', hash)
+      console.log('[SUCCESS] Atom creation confirmed! Tx:', hash)
 
       
 
@@ -983,7 +1130,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
             if (newAtom) {
 
-              console.log('✓✓ Atom indexed:', newAtom.id)
+              console.log('[OK][OK] Atom indexed:', newAtom.id)
 
               setUserAtom(newAtom)
 
@@ -1103,7 +1250,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       
       if (publicClient) {
         try {
-          console.log('📋 Reading minimum deposit from contract (auto-create)...')
+          console.log('[INFO] Reading minimum deposit from contract (auto-create)...')
           // Try to read getMinAtomDeposit
           const minDeposit = await publicClient.readContract({
             address: INTUITION_CONTRACT_ADDRESS,
@@ -1113,13 +1260,13 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
           
           if (minDeposit && minDeposit > 0n) {
             minimumDeposit = minDeposit
-            console.log('✓ Minimum deposit from contract:', minimumDeposit.toString(), 'wei')
+            console.log('[OK] Minimum deposit from contract:', minimumDeposit.toString(), 'wei')
             console.log('  (', (Number(minimumDeposit) / 1e18).toFixed(6), 'tTRUST)')
           } else {
-            console.warn('⚠️ Could not read minimum deposit, using default 0.01 tTRUST')
+            console.warn('[WARNING] Could not read minimum deposit, using default 0.01 tTRUST')
           }
         } catch (configError: any) {
-          console.warn('⚠️ Could not read minimum deposit from contract, using default 0.01 tTRUST:', configError.message)
+          console.warn('[WARNING] Could not read minimum deposit from contract, using default 0.01 tTRUST:', configError.message)
         }
       }
 
@@ -1156,7 +1303,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       console.log('Total in assets[]:', assetDeposit.toString(), 'wei')
       console.log('Total msg.value:', totalValue.toString(), 'wei')
       console.log('Total msg.value (tTRUST):', (Number(totalValue) / 1e18).toFixed(6))
-      console.log('⚠️ NOTE: assets[] = [minimumDeposit], msg.value = sum(assets[])')
+      console.log('[WARNING] NOTE: assets[] = [minimumDeposit], msg.value = sum(assets[])')
 
       // Call contract's createAtoms function
       // Function signature: createAtoms(bytes[] calldata data, uint256[] calldata assets) payable
@@ -1172,9 +1319,9 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         value: totalValue // msg.value = sum(assets[])
       })
 
-      console.log('✓ Transaction request sent to wallet')
+      console.log('[OK] Transaction request sent to wallet')
     } catch (err: any) {
-      console.error('❌ Failed to create profile:', err)
+      console.error('[ERROR] Failed to create profile:', err)
       setError(`Failed to create profile: ${err.message || 'Unknown error'}`)
       setIsInitializing(false)
     }
@@ -1196,9 +1343,9 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       )
 
       if (triple) {
-        console.log('✅ Triple created successfully:', triple.id)
+        console.log('[SUCCESS] Triple created successfully:', triple.id)
       } else {
-        console.warn('⚠️ Triple creation returned null - may need to retry')
+        console.warn('[WARNING] Triple creation returned null - may need to retry')
         
         // Try GraphQL mutation as fallback
         try {
@@ -1232,7 +1379,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
           const result = await response.json()
           if (result.data?.insert_triples_one) {
-            console.log('✅ Triple created via GraphQL:', result.data.insert_triples_one.id)
+            console.log('[SUCCESS] Triple created via GraphQL:', result.data.insert_triples_one.id)
           } else if (result.errors) {
             console.warn('GraphQL triple creation errors:', result.errors)
           }
@@ -1296,7 +1443,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       
       if (publicClient) {
         try {
-          console.log('📋 Reading minimum deposit from contract...')
+          console.log('[INFO] Reading minimum deposit from contract...')
           // Try to read getMinAtomDeposit
           const minDeposit = await publicClient.readContract({
             address: INTUITION_CONTRACT_ADDRESS,
@@ -1306,13 +1453,13 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
           
           if (minDeposit && minDeposit > 0n) {
             minimumDeposit = minDeposit
-            console.log('✓ Minimum deposit from contract:', minimumDeposit.toString(), 'wei')
+            console.log('[OK] Minimum deposit from contract:', minimumDeposit.toString(), 'wei')
             console.log('  (', (Number(minimumDeposit) / 1e18).toFixed(6), 'tTRUST)')
           } else {
-            console.warn('⚠️ Could not read minimum deposit, using default 0.01 tTRUST')
+            console.warn('[WARNING] Could not read minimum deposit, using default 0.01 tTRUST')
           }
         } catch (configError: any) {
-          console.warn('⚠️ Could not read minimum deposit from contract, using default 0.01 tTRUST:', configError.message)
+          console.warn('[WARNING] Could not read minimum deposit from contract, using default 0.01 tTRUST:', configError.message)
         }
       }
 
@@ -1322,7 +1469,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       const assetDeposit = minimumDeposit
       const totalValue = assetDeposit // msg.value must equal sum(assets[])
       
-      console.log('💡 Using deposit amount:', assetDeposit.toString(), 'wei')
+      console.log('[NOTE] Using deposit amount:', assetDeposit.toString(), 'wei')
       console.log('   (', (Number(assetDeposit) / 1e18).toFixed(6), 'tTRUST)')
 
       // Convert atom data to bytes for createAtoms function
@@ -1336,7 +1483,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       console.log('Total in assets[]:', assetDeposit.toString(), 'wei')
       console.log('Total msg.value:', totalValue.toString(), 'wei')
       console.log('Total msg.value (tTRUST):', (Number(totalValue) / 1e18).toFixed(6))
-      console.log('⚠️ NOTE: assets[] = [minimumDeposit], msg.value = sum(assets[])')
+      console.log('[WARNING] NOTE: assets[] = [minimumDeposit], msg.value = sum(assets[])')
 
       // Prepare function arguments
       // assets[] contains only the deposit, msg.value contains fee + deposit
@@ -1348,7 +1495,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       // Simulate transaction first to catch errors
       if (publicClient && address) {
         try {
-          console.log('🔍 Simulating transaction to check for errors...')
+          console.log('[INFO] Simulating transaction to check for errors...')
           const simulation = await publicClient.simulateContract({
             account: address,
             address: INTUITION_CONTRACT_ADDRESS,
@@ -1357,10 +1504,10 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
             args: functionArgs,
             value: totalValue // msg.value = creationFee + sum(assets[])
           })
-          console.log('✅ Simulation successful - transaction should work')
+          console.log('[SUCCESS] Simulation successful - transaction should work')
           console.log('Simulation result:', simulation)
         } catch (simError: any) {
-          console.error('❌ Simulation failed - transaction will revert!')
+          console.error('[ERROR] Simulation failed - transaction will revert!')
           console.error('Full error:', simError)
           console.error('Error cause:', simError?.cause)
           console.error('Error data:', simError?.cause?.data)
@@ -1408,7 +1555,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
             errorMessage = `Minimum deposit not met. Required: ${(Number(minimumDeposit) / 1e18).toFixed(6)} tTRUST, you provided: ${(Number(assetDeposit) / 1e18).toFixed(6)} tTRUST.`
           }
           
-          setError(`⚠️ ${errorMessage}. Check browser console (F12) for full details.`)
+          setError(`[WARNING] ${errorMessage}. Check browser console (F12) for full details.`)
           setIsInitializing(false)
           return
         }
@@ -1425,7 +1572,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         value: totalValue // msg.value = sum(assets[])
       })
 
-      console.log('✓ Transaction request sent to wallet')
+      console.log('[OK] Transaction request sent to wallet')
       // Note: Transaction confirmation and GraphQL polling is handled in the useEffect hook
 
 
@@ -1550,7 +1697,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
 
 
-      console.log('✓ Profile updated via GraphQL')
+      console.log('[OK] Profile updated via GraphQL')
 
       setUserAtom({ ...userAtom, data: updatedData as Record<string, any> })
 
@@ -1585,7 +1732,7 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
           {/* Header */}
 
-          <div className="flex items-start justify-between mb-6">
+          <div className="flex items-start justify-between mb-6 pr-10">
 
             <div>
 
@@ -1595,15 +1742,15 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
               </h2>
 
-              <p className="text-xs text-amber-600 mt-1">⚠️ Requires 0.01 tTRUST deposit + gas fees. You can only create a profile once.</p>
-
             </div>
 
             <button
 
               onClick={() => setShowModal(false)}
 
-              className="text-gray-400 hover:text-gray-600"
+              className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+
+              aria-label="Close modal"
 
             >
 
@@ -1860,38 +2007,69 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
     <>
       {children}
 
-      {/* Welcome Banner - Show when profile exists */}
-      {isConnected && address && userAtom && (() => {
+      {/* Loading Overlay - Show while checking for user atom */}
+      {isConnected && address && isInitializing && !profileCheckComplete && mounted && typeof window !== 'undefined' && document.body
+        ? createPortal(
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+              <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+                <div className="text-center">
+                  <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">
+                    Checking your profile...
+                  </h2>
+                  <p className="text-gray-600">
+                    Please wait while we verify your account
+                  </p>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+
+      {/* Welcome Modal - Show when profile exists */}
+      {showWelcomeModal && isConnected && address && userAtom && profileCheckComplete && (() => {
         try {
           const atomData = typeof userAtom.data === 'string' 
             ? JSON.parse(userAtom.data) 
             : (userAtom.data || {})
           const userName = atomData.name || (userAtom as any).label || 'User'
           return userName ? (
-            <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[9997] max-w-md w-full mx-4" data-welcome-banner>
-              <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg shadow-lg p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
-                    <span className="text-xl">👋</span>
-                  </div>
-                  <div>
-                    <p className="font-semibold">Welcome back, {userName}!</p>
-                    <p className="text-sm text-blue-100">Your profile is ready</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    const banner = document.querySelector('[data-welcome-banner]')
-                    if (banner) banner.remove()
-                  }}
-                  className="text-white/80 hover:text-white transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+            mounted && typeof window !== 'undefined' && document.body
+              ? createPortal(
+                  <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+                      <button
+                        onClick={() => setShowWelcomeModal(false)}
+                        className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+                        aria-label="Close modal"
+                      >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                      <div className="text-center">
+                        <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <span className="text-3xl">Welcome</span>
+                        </div>
+                        <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                          Welcome back, {userName}!
+                        </h2>
+                        <p className="text-gray-600 mb-6">
+                          Your profile is ready. You can now vote on jobs and participate in the platform.
+                        </p>
+                        <button
+                          onClick={() => setShowWelcomeModal(false)}
+                          className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-colors font-medium"
+                        >
+                          Get Started
+                        </button>
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                )
+              : null
           ) : null
         } catch {
           return null
