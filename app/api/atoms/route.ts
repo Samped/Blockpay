@@ -57,24 +57,24 @@ export async function POST(request: NextRequest) {
           try {
             const atom = JSON.parse(responseText)
             if (atom && atom.id) {
-              console.log(`[API Route] ✅ SUCCESS: Atom created with ID: ${atom.id}`)
+              console.log(`[API Route] [SUCCESS] SUCCESS: Atom created with ID: ${atom.id}`)
               return NextResponse.json(atom)
             } else {
-              console.warn(`[API Route] ⚠️ Response missing atom ID:`, atom)
+              console.warn(`[API Route] [WARNING] Response missing atom ID:`, atom)
             }
           } catch (parseError) {
-            console.error(`[API Route] ❌ Failed to parse JSON:`, parseError)
+            console.error(`[API Route] [ERROR] Failed to parse JSON:`, parseError)
             return NextResponse.json(
               { error: 'Invalid JSON response', response: responseText.substring(0, 200) },
               { status: 500 }
             )
           }
         } else {
-          console.warn(`[API Route] ⚠️ Endpoint ${endpoint} returned ${response.status}`)
+          console.warn(`[API Route] [WARNING] Endpoint ${endpoint} returned ${response.status}`)
           console.warn(`[API Route]   Error: ${responseText.substring(0, 200)}`)
         }
       } catch (endpointError: any) {
-        console.error(`[API Route] ❌ Endpoint ${endpoint} failed:`, endpointError.message)
+        console.error(`[API Route] [ERROR] Endpoint ${endpoint} failed:`, endpointError.message)
         console.error(`[API Route]   Error details:`, endpointError)
         continue
       }
