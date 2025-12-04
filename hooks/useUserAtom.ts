@@ -1,15 +1,16 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAccount } from 'wagmi'
-
-const GRAPHQL_URL = 'https://testnet.intuition.sh/v1/graphql'
+import { useAccount, usePublicClient } from 'wagmi'
+import { intuitionClient } from '@/lib/intuitionClient'
 
 /**
  * Hook to get the current user's atom ID (term_id) from Intuition Knowledge Graph
+ * Uses the same method as UserProfile component: intuitionClient.getUserProfileByAddress
  */
 export function useUserAtom() {
   const { address, isConnected } = useAccount()
+  const publicClient = usePublicClient()
   const [userAtomId, setUserAtomId] = useState<`0x${string}` | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -22,52 +23,26 @@ export function useUserAtom() {
       }
 
       try {
-        const query = `
-          query GetUserAtom($address: String!) {
-            atoms(
-              where: {
-                _or: [
-                  { creator_id: { _eq: $address } }
-                  {
-                    _and: [
-                      { type: { _eq: "User" } }
-                      { 
-                        _or: [
-                          { data: { _contains: { address: $address } } }
-                          { data: { _contains: { wallet: $address } } }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-              limit: 1
-              order_by: { created_at: desc }
-            ) {
-              term_id
-            }
-          }
-        `
-
-        const response = await fetch(GRAPHQL_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query,
-            variables: { address: address.toLowerCase() },
-          }),
-        })
-
-        const result = await response.json()
-        const atom = result.data?.atoms?.[0]
+        console.log('[INFO] useUserAtom: Fetching user atom for address:', address)
         
-        if (atom?.term_id) {
-          setUserAtomId(atom.term_id.toLowerCase() as `0x${string}`)
+        // Use the same method as UserProfile component - this is what works!
+        const userAtom = await intuitionClient.getUserProfileByAddress(address, publicClient || undefined)
+        
+        if (userAtom?.term_id) {
+          const termId = userAtom.term_id.toLowerCase() as `0x${string}`
+          console.log('[SUCCESS] useUserAtom: Found user atom ID:', termId)
+          setUserAtomId(termId)
+        } else if (userAtom?.id) {
+          // Fallback to id if term_id not available
+          const atomId = userAtom.id.toLowerCase() as `0x${string}`
+          console.log('[SUCCESS] useUserAtom: Found user atom ID (from id field):', atomId)
+          setUserAtomId(atomId)
         } else {
+          console.warn('[WARNING] useUserAtom: No user atom found')
           setUserAtomId(null)
         }
       } catch (error) {
-        console.error('Error fetching user atom:', error)
+        console.error('[ERROR] useUserAtom: Error fetching user atom:', error)
         setUserAtomId(null)
       } finally {
         setLoading(false)
@@ -75,7 +50,7 @@ export function useUserAtom() {
     }
 
     fetchUserAtom()
-  }, [address, isConnected])
+  }, [address, isConnected, publicClient])
 
   return { userAtomId, loading }
 }
