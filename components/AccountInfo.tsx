@@ -183,13 +183,13 @@ export function AccountInfo({ accountInfo, onRefresh }: AccountInfoProps) {
                             <p>📧 {atomData.email}</p>
                           )}
                           {atomData.website && (
-                            <p>🌐 <a href={atomData.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.website}</a></p>
+                            <p>Web: <a href={atomData.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.website}</a></p>
                           )}
                           {atomData.twitter && (
-                            <p>🐦 <a href={`https://twitter.com/${(atomData.twitter || '').replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.twitter}</a></p>
+                            <p>Twitter: <a href={`https://twitter.com/${(atomData.twitter || '').replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.twitter}</a></p>
                           )}
                           {atomData.github && (
-                            <p>💻 <a href={`https://github.com/${atomData.github}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.github}</a></p>
+                            <p>GitHub: <a href={`https://github.com/${atomData.github}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.github}</a></p>
                           )}
                         </div>
                       )}
