@@ -9,9 +9,11 @@ export async function uploadToIPFS(
   if (extra.type) formData.append('type', extra.type)
   if (extra.jobId) formData.append('jobId', extra.jobId)
 
+  // Use a direct fetch - don't set any headers to let browser handle FormData automatically
   const res = await fetch('/api/ipfs/filebase', {
     method: 'POST',
     body: formData,
+    // Explicitly don't set Content-Type - browser will set it with boundary for FormData
   })
 
   const json = await res.json()
