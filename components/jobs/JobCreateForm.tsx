@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useAccount, usePublicClient } from 'wagmi'
 import { useJobPool } from '@/hooks/useJobPool'
+import { useUserAtom } from '@/hooks/useUserAtom'
 import { uploadToIPFS as uploadFilebaseToIPFS } from '@/frontend/uploadToIPFS'
 import { parseTrustAmount, JOB_POOL_ADDRESS, JOB_POOL_ABI } from '@/lib/jobPoolContract'
 
@@ -15,6 +16,7 @@ export function JobCreateForm({ onSuccess, onCancel }: JobCreateFormProps) {
   const { address, isConnected } = useAccount()
   const publicClient = usePublicClient()
   const { createJob, isWriting, isConfirming, isConfirmed, hash, writeError } = useJobPool()
+  const { userAtomId, loading: userAtomLoading } = useUserAtom()
   
   const [formData, setFormData] = useState({
     title: '',
@@ -126,6 +128,19 @@ export function JobCreateForm({ onSuccess, onCancel }: JobCreateFormProps) {
       return
     }
 
+    // Check if user has created a profile atom
+    if (userAtomLoading) {
+      setError('Checking your profile...')
+      return
+    }
+
+    if (!userAtomId) {
+      setError('Please create your profile first to create a job')
+      // Show the user atom creation modal
+      window.dispatchEvent(new CustomEvent('showCreateProfileModal'))
+      return
+    }
+
     if (!formData.deadline) {
       setError('Please set a deadline for the job')
       return
@@ -199,7 +214,7 @@ export function JobCreateForm({ onSuccess, onCancel }: JobCreateFormProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">Job Created Successfully! 🎉</h3>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">Job Created Successfully!</h3>
           <p className="text-gray-600 mb-4">Your job has been posted on-chain and is now open for submissions.</p>
           {(txHash || hash) && (
             <div className="mb-6 p-3 bg-gray-50 rounded-lg">
