@@ -153,7 +153,7 @@ export function UpvoteButton({ jobId, jobAtomId, userAtomId, onUpvoteSuccess }: 
         disabled
         className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed"
       >
-        <span>👍</span>
+        <span>Upvote</span>
         <span>Loading...</span>
       </button>
     )
@@ -171,7 +171,7 @@ export function UpvoteButton({ jobId, jobAtomId, userAtomId, onUpvoteSuccess }: 
           : 'bg-gray-100 text-gray-400 cursor-not-allowed'
       }`}
     >
-      <span>{hasUpvoted ? '✅' : '👍'}</span>
+      <span>{hasUpvoted ? 'Upvoted' : 'Upvote'}</span>
       <span>{hasUpvoted ? 'Upvoted' : 'Upvote'}</span>
       {upvoteCount !== null && (
         <span className="ml-1 text-sm font-semibold">({upvoteCount})</span>
