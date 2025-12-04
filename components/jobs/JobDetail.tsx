@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAccount } from 'wagmi'
 import { useJobPool } from '@/hooks/useJobPool'
 import { Job, Submission, JobStatus, SubmissionStatus, formatTrustAmount } from '@/lib/jobPoolContract'
 import { getIPFSUrl } from '@/lib/ipfs'
 import { SubmissionForm } from './SubmissionForm'
 import { KnowledgeGraphView } from './KnowledgeGraphView'
-import { UpvoteButton } from './UpvoteButton'
+import { VoteButton } from './VoteButton'
 import { useUserAtom } from '@/hooks/useUserAtom'
 import { usePublicClient } from 'wagmi'
 import { JOB_POOL_ADDRESS, JOB_POOL_ABI } from '@/lib/jobPoolContract'
@@ -18,6 +18,7 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
   const [error, setError] = useState(false)
   const [imageLoaded, setImageLoaded] = useState(false)
   const [imageError, setImageError] = useState(false)
+  const [loadingTimeout, setLoadingTimeout] = useState<NodeJS.Timeout | null>(null)
   
   if (!previewCID) {
     return (
@@ -29,7 +30,7 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
   
   // Clean CID - remove ipfs:// prefix and any leading slashes
   const cleanCid = previewCID.replace(/^ipfs:\/\//, '').replace(/^\/ipfs\//, '').replace(/^\/+/, '')
-  console.log('🖼️ SubmissionPreviewImage - CID:', cleanCid)
+  console.log('[IMAGE] SubmissionPreviewImage - CID:', cleanCid)
   
   // List of IPFS gateways with their URL formats
   // Start with our own proxy API (most reliable)
@@ -47,33 +48,139 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
   const isLastGateway = currentGatewayIndex >= gateways.length - 1
   
   const handleImageLoad = () => {
-    console.log(`✅ Image loaded successfully from ${gateways[currentGatewayIndex]?.name}`)
+    // Clear timeout if image loads successfully
+    if (loadingTimeout) {
+      clearTimeout(loadingTimeout)
+      setLoadingTimeout(null)
+    }
+    console.log(`[SUCCESS] Image loaded successfully from ${gateways[currentGatewayIndex]?.name}`)
     setImageLoaded(true)
     setImageError(false)
   }
   
   const handleImageError = () => {
-    console.warn(`❌ Gateway ${gateways[currentGatewayIndex]?.name} failed`)
+    // Clear timeout
+    if (loadingTimeout) {
+      clearTimeout(loadingTimeout)
+      setLoadingTimeout(null)
+    }
+    console.warn(`[ERROR] Gateway ${gateways[currentGatewayIndex]?.name} failed`)
     setImageError(true)
     
     if (!isLastGateway) {
-      console.log(`🔄 Trying next gateway: ${gateways[currentGatewayIndex + 1]?.name}`)
+      console.log(`[RETRY] Trying next gateway: ${gateways[currentGatewayIndex + 1]?.name}`)
       setTimeout(() => {
         setCurrentGatewayIndex(prev => prev + 1)
         setImageError(false)
         setImageLoaded(false)
       }, 500)
     } else {
-      console.error('❌ All IPFS gateways failed for CID:', cleanCid)
+      console.error('[ERROR] All IPFS gateways failed for CID:', cleanCid)
       setError(true)
     }
   }
   
-  // Reset when gateway changes
+  // Reset when gateway changes and set timeout
   useEffect(() => {
     setImageLoaded(false)
     setImageError(false)
-  }, [currentGatewayIndex])
+    
+    // Clear any existing timeout
+    if (loadingTimeout) {
+      clearTimeout(loadingTimeout)
+    }
+    
+    // Set a timeout for image loading (10 seconds for better reliability)
+    const timeout = setTimeout(() => {
+      setImageError(prevError => {
+        if (!prevError) {
+          console.warn(`[WARNING] Image loading timeout (10s) for ${gateways[currentGatewayIndex]?.name}`)
+          
+          if (!isLastGateway) {
+            console.log(`[RETRY] Trying next gateway: ${gateways[currentGatewayIndex + 1]?.name}`)
+            setTimeout(() => {
+              setCurrentGatewayIndex(prev => prev + 1)
+            }, 500)
+          } else {
+            console.error('[ERROR] All IPFS gateways failed for CID:', cleanCid)
+            setError(true)
+          }
+        }
+        return true
+      })
+    }, 10000) // 10 second timeout for better reliability
+    
+    setLoadingTimeout(timeout)
+    
+    // Cleanup timeout on unmount or when gateway changes
+    return () => {
+      if (timeout) {
+        clearTimeout(timeout)
+      }
+    }
+  }, [currentGatewayIndex, cleanCid, isLastGateway])
+  
+  // Pre-check API response for Filebase Proxy to catch JSON errors early
+  useEffect(() => {
+    if (currentGatewayIndex !== 0 || !currentUrl.includes('/api/ipfs/filebase/image')) {
+      return
+    }
+    
+    let cancelled = false
+    
+    const checkApiResponse = async () => {
+      try {
+        const response = await fetch(currentUrl, { 
+          method: 'HEAD', // Use HEAD to check without downloading
+          cache: 'no-cache'
+        })
+        
+        if (cancelled) return
+        
+        const contentType = response.headers.get('content-type')
+        
+        // If API returns JSON or error status, it's an error
+        if (!response.ok || (contentType && contentType.includes('application/json'))) {
+          console.error('[ERROR] Filebase Proxy API returned error:', {
+            status: response.status,
+            statusText: response.statusText,
+            contentType
+          })
+          
+          if (!isLastGateway) {
+            console.log(`[RETRY] Trying next gateway: ${gateways[currentGatewayIndex + 1]?.name}`)
+            setTimeout(() => {
+              if (!cancelled) {
+                setCurrentGatewayIndex(prev => prev + 1)
+              }
+            }, 500)
+          } else {
+            if (!cancelled) {
+              setError(true)
+            }
+          }
+        } else {
+          console.log('[INFO] Filebase Proxy API response looks good:', {
+            status: response.status,
+            contentType
+          })
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('[WARNING] Could not check API response:', err)
+          // Don't fail immediately, let the image tag try to load
+        }
+      }
+    }
+    
+    // Check after a short delay to see if API returns error
+    const checkTimeout = setTimeout(checkApiResponse, 1000)
+    
+    return () => {
+      cancelled = true
+      clearTimeout(checkTimeout)
+    }
+  }, [currentUrl, currentGatewayIndex, isLastGateway])
   
   
   if (error) {
@@ -83,7 +190,7 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
     return (
       <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
         <p className="text-sm text-red-800 font-medium mb-2">
-          ⚠️ Failed to load preview image from IPFS gateways
+          [WARNING] Failed to load preview image from IPFS gateways
         </p>
         <p className="text-xs text-red-600 mt-1 font-mono break-all mb-3">
           CID: {previewCID}
@@ -113,8 +220,32 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
     )
   }
   
+  // Prevent right-click context menu
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    return false
+  }
+
+  // Prevent drag-and-drop
+  const handleDragStart = (e: React.DragEvent) => {
+    e.preventDefault()
+    return false
+  }
+
+  // Prevent image selection
+  const handleSelectStart = (e: React.SyntheticEvent) => {
+    e.preventDefault()
+    return false
+  }
+
   return (
-    <div className="relative bg-white rounded-xl border-2 border-gray-200 shadow-lg overflow-hidden">
+    <div 
+      className="relative bg-white rounded-xl border-2 border-gray-200 shadow-lg overflow-hidden"
+      onContextMenu={handleContextMenu}
+      onDragStart={handleDragStart}
+      onSelectStart={handleSelectStart}
+      style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
+    >
       {!imageLoaded && !error && (
         <div className="absolute inset-0 flex items-center justify-center z-10 bg-gray-50">
           <div className="text-center">
@@ -130,6 +261,21 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
       )}
       
       <div className="relative w-full flex justify-center items-center bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+        {/* Invisible overlay to prevent direct image access */}
+        {imageLoaded && !error && (
+          <div 
+            className="absolute inset-0 z-30 cursor-not-allowed"
+            onContextMenu={handleContextMenu}
+            onDragStart={handleDragStart}
+            style={{ 
+              userSelect: 'none', 
+              WebkitUserSelect: 'none', 
+              MozUserSelect: 'none', 
+              msUserSelect: 'none',
+              pointerEvents: 'auto'
+            }}
+          />
+        )}
         <img
           key={currentGatewayIndex} // Force re-render when gateway changes
           src={currentUrl}
@@ -139,6 +285,9 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
           }`}
           onLoad={handleImageLoad}
           onError={handleImageError}
+          onContextMenu={handleContextMenu}
+          onDragStart={handleDragStart}
+          draggable={false}
           style={{ 
             display: error ? 'none' : 'block',
             maxWidth: '100%',
@@ -146,6 +295,16 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
             width: 'auto',
             height: 'auto',
             objectFit: 'contain',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            MozUserSelect: 'none',
+            msUserSelect: 'none',
+            pointerEvents: 'none', // Prevent direct interaction with image
+            WebkitUserDrag: 'none',
+            KhtmlUserDrag: 'none',
+            MozUserDrag: 'none',
+            OUserDrag: 'none',
+            userDrag: 'none',
           }}
         />
       </div>
@@ -175,7 +334,7 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
       {error && (
         <div className="p-4 text-center">
           <p className="text-sm text-red-800 font-medium mb-2">
-            ⚠️ Could not load preview image
+            [WARNING] Could not load preview image
           </p>
           <p className="text-xs text-red-600 font-mono break-all mb-3">
             CID: {cleanCid}
@@ -183,7 +342,7 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
           <div className="space-y-3">
             <button
               onClick={async () => {
-                console.log('🔄 Manually testing proxy API...')
+                console.log('[RETRY] Manually testing proxy API...')
                 try {
                   const proxyUrl = `/api/ipfs/filebase/image?cid=${encodeURIComponent(cleanCid)}`
                   console.log('Testing:', proxyUrl)
@@ -256,7 +415,7 @@ interface JobDetailProps {
 
 export function JobDetail({ jobId, onBack }: JobDetailProps) {
   const { address, isConnected } = useAccount()
-  const { getJob, acceptWork, cancelJob, isWriting, isConfirming } = useJobPool()
+  const { getJob, acceptWork, cancelJob, isWriting, isConfirming, hash, isConfirmed } = useJobPool()
   const publicClient = usePublicClient()
   const { userAtomId } = useUserAtom()
   const [jobAtomId, setJobAtomId] = useState<`0x${string}` | null>(null)
@@ -271,6 +430,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
     createdAt?: string
   }) | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
+  const [fullResCID, setFullResCID] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [showSubmissionForm, setShowSubmissionForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -281,6 +441,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
     category: '',
     requirements: '',
   })
+  const processedHashRef = useRef<string | null>(null)
 
   useEffect(() => {
     loadJobData()
@@ -322,11 +483,12 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
       setJob(jobData)
 
       // The contract only stores one submission (hasSubmission, worker, submissionHash)
-      // If there's a submission, fetch the preview CID from localStorage or IPFS
+      // If there's a submission, fetch the preview CID and fullRes CID from localStorage or IPFS
       if (jobData.hasSubmission && jobData.worker && jobData.submissionHash !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
         let previewCID = ''
+        let fullResCID = ''
         
-        // Try to get preview CID from localStorage first
+        // Try to get submission metadata from localStorage first
         try {
           // Try jobId-based key first
           const jobKey = `submission_metadata_job_${jobId.toString()}`
@@ -337,32 +499,46 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
               previewCID = submissionData.previewCID
               console.log('Found submission preview CID in localStorage:', previewCID)
             }
+            if (submissionData.fullResCID) {
+              fullResCID = submissionData.fullResCID
+              console.log('Found submission fullRes CID in localStorage:', fullResCID)
+            }
           }
           
           // If not found, try worker-based key
-          if (!previewCID) {
+          if (!previewCID || !fullResCID) {
             const workerKey = `submission_metadata_${jobId.toString()}_${jobData.worker.toLowerCase()}`
             const stored = localStorage.getItem(workerKey)
             if (stored) {
               const submissionData = JSON.parse(stored)
-              if (submissionData.previewCID) {
+              if (submissionData.previewCID && !previewCID) {
                 previewCID = submissionData.previewCID
                 console.log('Found submission preview CID in localStorage (worker key):', previewCID)
+              }
+              if (submissionData.fullResCID && !fullResCID) {
+                fullResCID = submissionData.fullResCID
+                console.log('Found submission fullRes CID in localStorage (worker key):', fullResCID)
               }
             }
           }
           
           // If still not found, try searching all submission metadata keys
-          if (!previewCID) {
+          if (!previewCID || !fullResCID) {
             for (let i = 0; i < localStorage.length; i++) {
               const key = localStorage.key(i)
               if (key && key.startsWith('submission_metadata_')) {
                 try {
                   const stored = JSON.parse(localStorage.getItem(key) || '{}')
-                  if (stored.jobId === jobId.toString() && stored.worker?.toLowerCase() === jobData.worker.toLowerCase() && stored.previewCID) {
-                    previewCID = stored.previewCID
-                    console.log('Found submission preview CID in localStorage (search):', previewCID)
-                    break
+                  if (stored.jobId === jobId.toString() && stored.worker?.toLowerCase() === jobData.worker.toLowerCase()) {
+                    if (stored.previewCID && !previewCID) {
+                      previewCID = stored.previewCID
+                      console.log('Found submission preview CID in localStorage (search):', previewCID)
+                    }
+                    if (stored.fullResCID && !fullResCID) {
+                      fullResCID = stored.fullResCID
+                      console.log('Found submission fullRes CID in localStorage (search):', fullResCID)
+                    }
+                    if (previewCID && fullResCID) break
                   }
                 } catch (e) {
                   // Skip invalid entries
@@ -375,9 +551,9 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
         }
         
         // If still not found, try fetching from IPFS using Filebase API
-        if (!previewCID) {
+        if (!previewCID || !fullResCID) {
           try {
-            console.log('🔍 Searching Filebase API for submission metadata with jobId:', jobId.toString())
+            console.log('[INFO] Searching Filebase API for submission metadata with jobId:', jobId.toString())
             // Try to fetch submission metadata from Filebase by searching for jobId
             const response = await fetch(`/api/ipfs/filebase/fetch?jobId=${jobId.toString()}`)
             console.log('Filebase API response status:', response.status)
@@ -401,9 +577,17 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
                 }
               }
               
-              if (submissionMeta?.previewCID) {
-                previewCID = submissionMeta.previewCID
-                console.log('✅ Found submission preview CID from Filebase API:', previewCID)
+              if (submissionMeta) {
+                if (submissionMeta.previewCID && !previewCID) {
+                  previewCID = submissionMeta.previewCID
+                  console.log('[SUCCESS] Found submission preview CID from Filebase API:', previewCID)
+                }
+                // Check both submissionMeta.fullResCID and submissionMeta.metadata?.fullResCID
+                const foundFullResCID = submissionMeta.fullResCID || submissionMeta.metadata?.fullResCID
+                if (foundFullResCID && !fullResCID) {
+                  fullResCID = foundFullResCID
+                  console.log('[SUCCESS] Found submission fullRes CID from Filebase API:', fullResCID)
+                }
                 
                 // Store it in localStorage for future use
                 const storageKey = `submission_metadata_job_${jobId.toString()}`
@@ -411,19 +595,20 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
                   jobId: jobId.toString(),
                   worker: jobData.worker,
                   previewCID: previewCID,
+                  fullResCID: fullResCID,
                   metadata: submissionMeta,
                   createdAt: new Date().toISOString(),
                 }))
                 console.log('💾 Stored submission metadata in localStorage with key:', storageKey)
               } else {
-                console.warn('⚠️ Filebase API returned data but no matching submission metadata found')
+                console.warn('[WARNING] Filebase API returned data but no matching submission metadata found')
               }
             } else {
               const errorText = await response.text()
               console.warn('Filebase API error response:', response.status, errorText)
             }
           } catch (err) {
-            console.error('❌ Error fetching submission metadata from Filebase:', err)
+            console.error('[ERROR] Error fetching submission metadata from Filebase:', err)
           }
         }
         
@@ -433,6 +618,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
           hasSubmission: jobData.hasSubmission,
           submissionHash: jobData.submissionHash,
           previewCID: previewCID || 'NOT FOUND',
+          fullResCID: fullResCID || 'NOT FOUND',
         })
         
         const submission: Submission = {
@@ -444,9 +630,14 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
         }
         setSubmissions([submission])
         
+        // Store fullResCID in a separate state for use when job is completed
+        if (fullResCID) {
+          setFullResCID(fullResCID)
+        }
+        
         // If previewCID is still empty, log a warning
         if (!previewCID) {
-          console.warn('⚠️ Preview CID not found for submission. Worker:', jobData.worker, 'JobId:', jobId.toString())
+          console.warn('[WARNING] Preview CID not found for submission. Worker:', jobData.worker, 'JobId:', jobId.toString())
           console.warn('   This might mean the submission metadata was not stored or the Filebase search failed.')
           console.warn('   Check localStorage for keys starting with "submission_metadata_"')
         }
@@ -461,8 +652,167 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
     }
   }
 
+  // Effect to handle transaction confirmation and create notification
+  useEffect(() => {
+    if (!isConfirmed || !hash || !job || !publicClient) return
+    
+    // Prevent duplicate processing
+    if (processedHashRef.current === hash) {
+      console.log('⚠️ Transaction hash already processed:', hash)
+      return
+    }
+
+    const handleTransactionConfirmed = async () => {
+      try {
+        console.log('✅ Transaction confirmed, creating notification for worker...', hash)
+        
+        // Mark this hash as processed
+        processedHashRef.current = hash
+        
+        // Get transaction receipt to verify it succeeded
+        const receipt = await publicClient.getTransactionReceipt({ hash })
+        if (!receipt || receipt.status !== 'success') {
+          console.error('Transaction failed:', receipt)
+          processedHashRef.current = null // Reset on failure
+          return
+        }
+
+        // Get worker address from job
+        const workerAddress = job.worker || submissions[0]?.submitter || ''
+        if (!workerAddress) {
+          console.error('No worker address found')
+          return
+        }
+
+        const jobPayment = job.payment || BigInt(0)
+        
+        // Calculate worker payment more accurately
+        // Platform fee is stored in basis points (e.g., 250 = 2.5%)
+        // Default platform fee is 2.5% if not available
+        const BASIS_POINTS = 10000n
+        const defaultPlatformFee = 250n // 2.5% in basis points
+        // Try to get platformFeeAtCreation from job, fallback to default
+        const jobAny = job as any
+        const platformFeeBasisPoints = jobAny.platformFeeAtCreation 
+          ? BigInt(jobAny.platformFeeAtCreation) 
+          : defaultPlatformFee
+        const platformFee = (jobPayment * platformFeeBasisPoints) / BASIS_POINTS
+        const workerPayment = jobPayment > platformFee ? jobPayment - platformFee : jobPayment
+        
+        // When job is completed, store the full resolution image CID for the creator
+        // Try to get fullResCID from state, or retrieve from submission metadata
+        let finalFullResCID = fullResCID
+        if (!finalFullResCID && workerAddress) {
+          try {
+            // Try to get from submission metadata
+            const submissionKey = `submission_metadata_job_${jobId.toString()}`
+            const submissionData = localStorage.getItem(submissionKey)
+            if (submissionData) {
+              const submission = JSON.parse(submissionData)
+              finalFullResCID = submission.fullResCID || submission.metadata?.fullResCID
+            }
+            
+            // Also try worker-specific key
+            if (!finalFullResCID) {
+              const workerKey = `submission_metadata_${jobId.toString()}_${workerAddress.toLowerCase()}`
+              const workerData = localStorage.getItem(workerKey)
+              if (workerData) {
+                const submission = JSON.parse(workerData)
+                finalFullResCID = submission.fullResCID || submission.metadata?.fullResCID
+              }
+            }
+          } catch (err) {
+            console.warn('Error retrieving fullResCID from submission metadata:', err)
+          }
+        }
+        
+        if (address) {
+          try {
+            // Store completed job with full resolution image for creator
+            const completedJobKey = `completed_job_${jobId.toString()}_${address.toLowerCase()}`
+            const completedJobData = {
+              jobId: jobId.toString(),
+              creator: address,
+              worker: workerAddress,
+              fullResCID: finalFullResCID || '',
+              previewCID: submissions[0]?.previewCID || '',
+              completedAt: new Date().toISOString(),
+              title: job.title || `Job #${jobId.toString()}`,
+              description: job.description || '',
+            }
+            localStorage.setItem(completedJobKey, JSON.stringify(completedJobData))
+            console.log('💾 Stored completed job with full resolution image for creator:', completedJobKey)
+            
+            // Also store in a list of all completed jobs for this creator
+            const creatorCompletedJobsKey = `creator_completed_jobs_${address.toLowerCase()}`
+            const existingJobs = JSON.parse(localStorage.getItem(creatorCompletedJobsKey) || '[]')
+            // Check if this job is already in the list
+            if (!existingJobs.find((j: any) => j.jobId === jobId.toString())) {
+              existingJobs.push({
+                jobId: jobId.toString(),
+                completedAt: completedJobData.completedAt,
+              })
+              localStorage.setItem(creatorCompletedJobsKey, JSON.stringify(existingJobs))
+              console.log('💾 Updated creator completed jobs list')
+            }
+          } catch (err) {
+            console.error('Error storing completed job data:', err)
+          }
+        }
+        
+        // Create notification for worker when job is completed and payment is sent
+        try {
+          const notificationId = `notification_${Date.now()}_${jobId.toString()}`
+          const notification = {
+            id: notificationId,
+            type: 'job_completed',
+            jobId: jobId.toString(),
+            title: job.title || `Job #${jobId.toString()}`,
+            message: `Your work has been selected! Payment of ${workerPayment.toString()} TRUST has been sent to your account.`,
+            workerAddress: workerAddress.toLowerCase(),
+            creatorAddress: address?.toLowerCase() || '',
+            paymentAmount: workerPayment.toString(),
+            createdAt: new Date().toISOString(),
+            read: false,
+          }
+          
+          // Store notification for worker
+          const workerNotificationsKey = `worker_notifications_${workerAddress.toLowerCase()}`
+          const existingNotifications = JSON.parse(localStorage.getItem(workerNotificationsKey) || '[]')
+          // Check if notification already exists for this job
+          const existingNotification = existingNotifications.find((n: any) => n.jobId === jobId.toString())
+          if (!existingNotification) {
+            existingNotifications.unshift(notification) // Add to beginning
+            // Keep only last 50 notifications
+            const recentNotifications = existingNotifications.slice(0, 50)
+            localStorage.setItem(workerNotificationsKey, JSON.stringify(recentNotifications))
+            console.log('🔔 Created notification for worker:', workerAddress, 'Job:', jobId.toString())
+            
+            // Trigger storage event so other tabs/components can update
+            window.dispatchEvent(new StorageEvent('storage', {
+              key: workerNotificationsKey,
+              newValue: JSON.stringify(recentNotifications),
+            }))
+          } else {
+            console.log('⚠️ Notification already exists for this job')
+          }
+        } catch (err) {
+          console.error('Error creating worker notification:', err)
+        }
+        
+        // Reload job data
+        loadJobData()
+      } catch (err: any) {
+        console.error('Error handling transaction confirmation:', err)
+      }
+    }
+
+    handleTransactionConfirmed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConfirmed, hash])
+
   async function handleApprove() {
-    if (!job) return
+    if (!job || !publicClient) return
 
     try {
       // The contract uses acceptWork(jobId) instead of approveWork(jobId, submissionId)
@@ -472,8 +822,8 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
         return
       }
       
-      // Reload job data
-      await loadJobData()
+      // Notification will be created in useEffect when transaction is confirmed
+      console.log('⏳ Waiting for transaction confirmation to create notification...')
     } catch (err: any) {
       setError(err.message || 'Failed to approve submission')
     }
@@ -569,17 +919,6 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
               <span className="text-base font-semibold text-primary">
                 Budget: {formatTrustAmount(job.payment)} TRUST
               </span>
-              {jobAtomId && (
-                <UpvoteButton
-                  jobId={jobId}
-                  jobAtomId={jobAtomId}
-                  userAtomId={userAtomId}
-                  onUpvoteSuccess={() => {
-                    // Optionally reload data or show success message
-                    console.log('Upvote successful!')
-                  }}
-                />
-              )}
             </div>
           </div>
           {onBack && (
@@ -591,6 +930,16 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
             </button>
           )}
         </div>
+        <div className="flex justify-end">
+          <VoteButton
+            jobId={jobId}
+            jobAtomId={jobAtomId || '0x0000000000000000000000000000000000000000000000000000000000000000'}
+            userAtomId={userAtomId}
+            onVoteSuccess={() => {
+              console.log('Vote successful!')
+            }}
+          />
+        </div>
       </div>
 
       {/* Job Metadata Card */}
@@ -601,7 +950,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
             <button
               onClick={async () => {
                 // Force reload from Filebase
-                console.log('🔄 Force reloading job metadata from Filebase...')
+                console.log('[RETRY] Force reloading job metadata from Filebase...')
                 console.log('Job details:', {
                   jobId: job.jobId.toString(),
                   deadline: job.deadline.toString(),
@@ -1053,7 +1402,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
                 ) : (
                   <div className="mb-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                     <p className="text-sm text-yellow-800">
-                      ⚠️ Preview image not available. The submission was made but the preview CID could not be retrieved.
+                      [WARNING] Preview image not available. The submission was made but the preview CID could not be retrieved.
                     </p>
                     <p className="text-xs text-yellow-600 mt-1">
                       Worker: {submission.submitter}
