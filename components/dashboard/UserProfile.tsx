@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { usePublicClient, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
-import { parseEther, decodeErrorResult } from 'viem'
+import { parseEther, decodeErrorResult, formatUnits } from 'viem'
 import { intuitionClient, Atom, TrustScore, Triple } from '@/lib/intuitionClient'
 import { INTUITION_CONTRACT_ABI, INTUITION_CONTRACT_ADDRESS, atomDataToBytes } from '@/lib/intuitionContract'
+import { CompletedJobs } from './CompletedJobs'
+import { WorkerNotifications } from './WorkerNotifications'
 
 interface UserProfileProps {
   address: string
@@ -45,6 +47,19 @@ export function UserProfile({ address }: UserProfileProps) {
     socialLinks: {},
   })
   const [loading, setLoading] = useState(true)
+  const [walletBalance, setWalletBalance] = useState<string | null>(null)
+  
+  // Count completed jobs from localStorage
+  const countCompletedJobsFromStorage = () => {
+    if (!address) return 0
+    try {
+      const creatorCompletedJobsKey = `creator_completed_jobs_${address.toLowerCase()}`
+      const jobIds = JSON.parse(localStorage.getItem(creatorCompletedJobsKey) || '[]')
+      return jobIds.length
+    } catch (err) {
+      return 0
+    }
+  }
   const [isEditing, setIsEditing] = useState(false)
   const [showSuccessToast, setShowSuccessToast] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
@@ -68,30 +83,35 @@ export function UserProfile({ address }: UserProfileProps) {
 
       try {
         setLoading(true)
-        console.log('🔍 Fetching user profile for address:', address)
+        console.log('[INFO] Fetching user profile for address:', address)
         console.log('📡 Public client available:', !!publicClient)
 
         // Fetch user profile using GraphQL API, passing publicClient to check contract
         const profileData = await intuitionClient.getUserProfileData(address, publicClient || undefined)
         
-        console.log('📊 Profile data received:', {
+        console.log('[STATS] Profile data received:', {
           hasAtom: !!profileData.atom,
           atomId: profileData.atom?.id,
           trustScore: profileData.trustScore?.score
         })
         
-        const { atom: userAtom, trustScore, completedJobs, createdArtworks, profileData: atomData } = profileData
+        const { atom: userAtom, trustScore, completedJobs: apiCompletedJobs, createdArtworks, profileData: atomData } = profileData
+        
+        // Count completed jobs from localStorage (more accurate)
+        const storageCompletedJobs = countCompletedJobsFromStorage()
+        const completedJobs = Math.max(apiCompletedJobs, storageCompletedJobs)
 
         if (!userAtom) {
-          console.warn('⚠️ No atom found via getUserProfileData, trying direct query...')
+          console.warn('[WARNING] No atom found via getUserProfileData, trying direct query...')
           
           // Try a direct query to see if ANY atoms exist for this creator
           try {
+            // Try exact match first
             const directQuery = `
               query CheckAtoms($address: String!) {
                 atoms(
                   where: { creator_id: { _eq: $address } }
-                  limit: 10
+                  limit: 50
                   order_by: { created_at: desc }
                 ) {
                   term_id
@@ -105,7 +125,7 @@ export function UserProfile({ address }: UserProfileProps) {
                 }
               }
             `
-            const response = await fetch('https://testnet.intuition.sh/v1/graphql', {
+            let response = await fetch('https://testnet.intuition.sh/v1/graphql', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -113,9 +133,51 @@ export function UserProfile({ address }: UserProfileProps) {
                 variables: { address: address.toLowerCase() }
               })
             })
-            const result = await response.json()
+            let result = await response.json()
+            
+            // If no results, try fetching recent atoms and filtering client-side (case-insensitive)
+            if (!result.data?.atoms || result.data.atoms.length === 0) {
+              console.log('[INFO] Exact match found 0 atoms, trying case-insensitive search...')
+              const recentQuery = `
+                query GetRecentAtoms {
+                  atoms(
+                    limit: 300
+                    order_by: { created_at: desc }
+                  ) {
+                    term_id
+                    type
+                    label
+                    emoji
+                    image
+                    data
+                    created_at
+                    creator_id
+                  }
+                }
+              `
+              response = await fetch('https://testnet.intuition.sh/v1/graphql', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  query: recentQuery
+                })
+              })
+              const recentResult = await response.json()
+              
+              if (recentResult.data?.atoms) {
+                // Filter by creator_id case-insensitively
+                result = {
+                  data: {
+                    atoms: recentResult.data.atoms.filter((atom: any) => 
+                      atom.creator_id?.toLowerCase() === address.toLowerCase()
+                    )
+                  }
+                }
+                console.log('[SUCCESS] Case-insensitive filter found', result.data.atoms.length, 'atoms')
+              }
+            }
             if (result.data?.atoms?.length > 0) {
-              console.log('✅ Found', result.data.atoms.length, 'atoms created by this address')
+              console.log('[SUCCESS] Found', result.data.atoms.length, 'atoms created by this address')
               
               // Find the best matching User profile atom
               let bestAtom: any = null
@@ -130,12 +192,12 @@ export function UserProfile({ address }: UserProfileProps) {
                     // Skip if it's just a type description like "json object" or "JsonObject"
                     const dataStr = atom.data.trim()
                     if ((dataStr.toLowerCase() === 'json object' || dataStr === 'JsonObject') && dataStr.length < 50) {
-                      console.log(`      ⚠️ Skipping atom ${idx + 1} - data is just type description: "${dataStr}"`)
+                      console.log(`      [WARNING] Skipping atom ${idx + 1} - data is just type description: "${dataStr}"`)
                       parsedData = {}
                     } else {
                       try {
                         parsedData = JSON.parse(atom.data)
-                        console.log(`      ✅ Successfully parsed JSON data for atom ${idx + 1}`)
+                        console.log(`      [SUCCESS] Successfully parsed JSON data for atom ${idx + 1}`)
                       } catch (parseErr) {
                         // If it's not valid JSON, check if it's a simple string value
                         if (atom.data.length > 0 && atom.data.length < 200) {
@@ -148,10 +210,10 @@ export function UserProfile({ address }: UserProfileProps) {
                     }
                   } else if (atom.data && typeof atom.data === 'object') {
                     parsedData = atom.data
-                    console.log(`      ✅ Using atom ${idx + 1} data as object`)
+                    console.log(`      [SUCCESS] Using atom ${idx + 1} data as object`)
                   }
                 } catch (e) {
-                  console.warn(`      ⚠️ Could not parse atom ${idx + 1} data:`, e)
+                  console.warn(`      [WARNING] Could not parse atom ${idx + 1} data:`, e)
                   parsedData = {}
                 }
                 
@@ -212,7 +274,7 @@ export function UserProfile({ address }: UserProfileProps) {
                     parsedData.dribbble
                   ].filter(Boolean).length
                   
-                  console.log(`      ✅ This is a User profile! Score: ${profileDataScore}`)
+                  console.log(`      [SUCCESS] This is a User profile! Score: ${profileDataScore}`)
                   
                   if (profileDataScore > bestScore) {
                     bestAtom = atom
@@ -221,39 +283,42 @@ export function UserProfile({ address }: UserProfileProps) {
                     console.log(`      ⭐ New best atom! (Score: ${bestScore})`)
                   }
                 } else {
-                  console.log(`      ⚠️ Not a User profile`)
+                  console.log(`      [WARNING] Not a User profile`)
                 }
               })
               
               // Use the best matching atom if found, OR use the first atom if we have any atoms at all
               // (even if it doesn't have a high score, it's better than nothing)
-              if (bestAtom) {
-                // If we have a good match (score > 0), use it
-                // Otherwise, if we have ANY atom, use the first one (might be a profile we just haven't recognized)
-                if (bestScore === 0 && result.data.atoms.length > 0) {
-                  // Use the first atom as fallback
-                  const firstAtom = result.data.atoms[0]
-                  let firstParsedData: any = {}
-                  
-                  try {
-                    if (typeof firstAtom.data === 'string') {
-                      const dataStr = firstAtom.data.trim()
-                      if (!(dataStr.toLowerCase() === 'json object' || dataStr === 'JsonObject') || dataStr.length >= 50) {
-                        try {
-                          firstParsedData = JSON.parse(firstAtom.data)
-                        } catch {}
-                      }
-                    } else if (firstAtom.data && typeof firstAtom.data === 'object') {
-                      firstParsedData = firstAtom.data
-                    }
-                  } catch {}
-                  
-                  bestAtom = firstAtom
-                  bestParsedData = firstParsedData
-                  console.log('⚠️ No high-scoring profile found, using first atom as fallback')
-                }
+              if (!bestAtom && result.data.atoms.length > 0) {
+                // No atoms matched profile criteria, but we have atoms - use the first one
+                console.log('[WARNING] No atoms matched profile criteria, using first atom as fallback')
+                const firstAtom = result.data.atoms[0]
+                let firstParsedData: any = {}
                 
-                console.log('✅✅✅ Using atom as user profile!')
+                try {
+                  if (typeof firstAtom.data === 'string') {
+                    const dataStr = firstAtom.data.trim()
+                    if (!(dataStr.toLowerCase() === 'json object' || dataStr === 'JsonObject') || dataStr.length >= 50) {
+                      try {
+                        firstParsedData = JSON.parse(firstAtom.data)
+                      } catch {}
+                    }
+                  } else if (firstAtom.data && typeof firstAtom.data === 'object') {
+                    firstParsedData = firstAtom.data
+                  }
+                } catch {}
+                
+                bestAtom = firstAtom
+                bestParsedData = firstParsedData
+                bestScore = 0
+              } else if (bestAtom && bestScore === 0) {
+                // We have a bestAtom but score is 0 - still use it
+                console.log('[WARNING] Using atom with score 0 (matches profile criteria but no profile data)')
+              }
+              
+              if (bestAtom) {
+                
+                console.log('[SUCCESS][SUCCESS][SUCCESS] Using atom as user profile!')
                 console.log('   Atom term_id:', bestAtom.term_id?.substring(0, 30))
                 console.log('   Profile data score:', bestScore)
                 console.log('   Label:', bestAtom.label)
@@ -317,7 +382,7 @@ export function UserProfile({ address }: UserProfileProps) {
                   },
                 }
                 
-                console.log('📝 Setting user data:', {
+                console.log('[NOTE] Setting user data:', {
                   hasAtom: !!userDataToSet.atom,
                   atomId: userDataToSet.atom?.id?.substring(0, 30),
                   name: userDataToSet.name,
@@ -338,16 +403,16 @@ export function UserProfile({ address }: UserProfileProps) {
                   dribbble: bestParsedData.dribbble || bestParsedData.socialLinks?.dribbble || '',
                 })
                 setLoading(false)
-                console.log('✅✅✅ Profile data set successfully! Dashboard should now show profile.')
+                console.log('[SUCCESS][SUCCESS][SUCCESS] Profile data set successfully! Dashboard should now show profile.')
                 return
               } else {
-                console.log('⚠️ Found atoms but none could be used as profile')
+                console.log('[WARNING] Found atoms but none could be used as profile')
               }
             } else {
-              console.log('🔍 Direct query also found 0 atoms - they may not be indexed yet')
+              console.log('[INFO] Direct query also found 0 atoms - they may not be indexed yet')
             }
           } catch (checkError) {
-            console.error('❌ Error in diagnostic query:', checkError)
+            console.error('[ERROR] Error in diagnostic query:', checkError)
           }
         }
 
@@ -357,11 +422,15 @@ export function UserProfile({ address }: UserProfileProps) {
             userAtom.id = userAtom.term_id
           }
           
+          // Count completed jobs from localStorage
+          const storageCompletedJobs = countCompletedJobsFromStorage()
+          const finalCompletedJobs = Math.max(completedJobs, storageCompletedJobs)
+          
           // Extract user data from atom
           setUserData({
             atom: userAtom,
             trustScore,
-            completedJobs,
+            completedJobs: finalCompletedJobs,
             createdArtworks,
             bio: atomData.bio || '',
             name: atomData.name || userAtom.label || '',
@@ -388,7 +457,7 @@ export function UserProfile({ address }: UserProfileProps) {
           })
         }
       } catch (error) {
-        console.error('❌ Error fetching user data:', error)
+        console.error('[ERROR] Error fetching user data:', error)
       } finally {
         setLoading(false)
       }
@@ -401,6 +470,23 @@ export function UserProfile({ address }: UserProfileProps) {
     fetchUserData()
   }, [address, publicClient])
 
+  // Fetch wallet TRUST balance (native token) and show it under the wallet address
+  useEffect(() => {
+    const fetchBalance = async () => {
+      if (!publicClient || !address) return
+      try {
+        const balance = await publicClient.getBalance({ address: address as `0x${string}` })
+        const formatted = formatUnits(balance, 18)
+        setWalletBalance(formatted)
+        console.log('[INFO] Wallet balance fetched:', formatted, 'TRUST')
+      } catch (err) {
+        console.error('[ERROR] Error fetching wallet balance:', err)
+      }
+    }
+
+    fetchBalance()
+  }, [publicClient, address])
+
   const handleSave = async () => {
     const atomId = userData.atom?.term_id || userData.atom?.id
     if (!atomId) {
@@ -409,7 +495,7 @@ export function UserProfile({ address }: UserProfileProps) {
     }
 
     if (!isConnected || !address) {
-      console.error('❌ Wallet not connected:', { isConnected, address })
+      console.error('[ERROR] Wallet not connected:', { isConnected, address })
       alert('Please connect your wallet to update your profile')
       return
     }
@@ -420,7 +506,7 @@ export function UserProfile({ address }: UserProfileProps) {
     }
     
     console.log('💾 Updating profile on-chain with atom ID:', atomId)
-    console.log('✅ Wallet connected:', { isConnected, address, chainId: chain?.id })
+    console.log('[SUCCESS] Wallet connected:', { isConnected, address, chainId: chain?.id })
 
     try {
       setLoading(true)
@@ -454,7 +540,7 @@ export function UserProfile({ address }: UserProfileProps) {
       
       if (publicClient) {
         try {
-          console.log('📋 Reading minimum deposit from contract...')
+          console.log('[INFO] Reading minimum deposit from contract...')
           // Try to read getMinAtomDeposit
           const minDeposit = await publicClient.readContract({
             address: INTUITION_CONTRACT_ADDRESS,
@@ -464,13 +550,13 @@ export function UserProfile({ address }: UserProfileProps) {
           
           if (minDeposit && minDeposit > 0n) {
             minimumDeposit = minDeposit
-            console.log('✓ Minimum deposit from contract:', minimumDeposit.toString(), 'wei')
+            console.log('[OK] Minimum deposit from contract:', minimumDeposit.toString(), 'wei')
             console.log('  (', (Number(minimumDeposit) / 1e18).toFixed(6), 'tTRUST)')
           } else {
-            console.warn('⚠️ Could not read minimum deposit, using default 0.01 tTRUST')
+            console.warn('[WARNING] Could not read minimum deposit, using default 0.01 tTRUST')
           }
         } catch (configError: any) {
-          console.warn('⚠️ Could not read minimum deposit from contract, using default 0.01 tTRUST:', configError.message)
+          console.warn('[WARNING] Could not read minimum deposit from contract, using default 0.01 tTRUST:', configError.message)
         }
       }
 
@@ -480,7 +566,7 @@ export function UserProfile({ address }: UserProfileProps) {
       const assetDeposit = minimumDeposit
       const totalValue = assetDeposit // msg.value must equal sum(assets[])
       
-      console.log('💡 Using deposit amount:', assetDeposit.toString(), 'wei')
+      console.log('[NOTE] Using deposit amount:', assetDeposit.toString(), 'wei')
       console.log('   (', (Number(assetDeposit) / 1e18).toFixed(6), 'tTRUST)')
 
       console.log('=== Updating profile atom on-chain ===')
@@ -491,7 +577,7 @@ export function UserProfile({ address }: UserProfileProps) {
       console.log('Total in assets[]:', assetDeposit.toString(), 'wei')
       console.log('Total msg.value:', totalValue.toString(), 'wei')
       console.log('Total msg.value (tTRUST):', (Number(totalValue) / 1e18).toFixed(6))
-      console.log('⚠️ NOTE: assets[] = [minimumDeposit], msg.value = sum(assets[])')
+      console.log('[WARNING] NOTE: assets[] = [minimumDeposit], msg.value = sum(assets[])')
 
       // Prepare function arguments - EXACTLY like UserInitialization.tsx
       // assets[] contains only the deposit, msg.value contains fee + deposit
@@ -503,7 +589,7 @@ export function UserProfile({ address }: UserProfileProps) {
       // Simulate transaction first to catch errors - EXACTLY like UserInitialization.tsx
       if (publicClient && address) {
         try {
-          console.log('🔍 Simulating transaction to check for errors...')
+          console.log('[INFO] Simulating transaction to check for errors...')
           const simulation = await publicClient.simulateContract({
             account: address as `0x${string}`,
             address: INTUITION_CONTRACT_ADDRESS,
@@ -512,10 +598,10 @@ export function UserProfile({ address }: UserProfileProps) {
             args: functionArgs,
             value: totalValue // msg.value = sum(assets[])
           })
-          console.log('✅ Simulation successful - transaction should work')
+          console.log('[SUCCESS] Simulation successful - transaction should work')
           console.log('Simulation result:', simulation)
         } catch (simError: any) {
-          console.error('❌ Simulation failed - transaction will revert!')
+          console.error('[ERROR] Simulation failed - transaction will revert!')
           console.error('Full error:', simError)
           console.error('Error cause:', simError?.cause)
           console.error('Error data:', simError?.cause?.data)
@@ -558,8 +644,8 @@ export function UserProfile({ address }: UserProfileProps) {
           if (errorSig === '0xb4856ebc') {
             // This error suggests the contract is rejecting duplicate atoms
             // Since atoms are immutable, we should update via GraphQL instead
-            console.error('⚠️ Error 0xb4856ebc - contract rejecting duplicate atom creation')
-            console.log('💡 Falling back to GraphQL update instead of on-chain creation')
+            console.error('[WARNING] Error 0xb4856ebc - contract rejecting duplicate atom creation')
+            console.log('[NOTE] Falling back to GraphQL update instead of on-chain creation')
             
             // Fall back to GraphQL update
             setLoading(false)
@@ -651,7 +737,7 @@ export function UserProfile({ address }: UserProfileProps) {
           }
           
           setLoading(false)
-          alert(`⚠️ ${errorMessage}. Check browser console (F12) for full details.`)
+          alert(`[WARNING] ${errorMessage}. Check browser console (F12) for full details.`)
           return
         }
       }
@@ -667,7 +753,7 @@ export function UserProfile({ address }: UserProfileProps) {
         value: totalValue // msg.value = sum(assets[])
       })
 
-      console.log('✓ Transaction request sent to wallet')
+      console.log('[OK] Transaction request sent to wallet')
       // Note: Transaction confirmation and GraphQL update will be handled in useEffect below
     } catch (error: any) {
       console.error('Error updating profile:', error)
@@ -679,7 +765,7 @@ export function UserProfile({ address }: UserProfileProps) {
   // Handle transaction confirmation and update GraphQL
   useEffect(() => {
     if (isConfirmed && hash) {
-      console.log('✅ Profile update transaction confirmed! Tx:', hash)
+      console.log('[SUCCESS] Profile update transaction confirmed! Tx:', hash)
       
       const updateAfterConfirmation = async () => {
         try {
@@ -771,7 +857,7 @@ export function UserProfile({ address }: UserProfileProps) {
 
           setIsEditing(false)
           setLoading(false)
-          console.log('✅ Profile updated successfully on-chain!')
+          console.log('[SUCCESS] Profile updated successfully on-chain!')
           setSuccessMessage(`Profile updated successfully! Transaction: ${hash.substring(0, 10)}...${hash.substring(hash.length - 8)}`)
           setShowSuccessToast(true)
         } catch (error) {
@@ -842,12 +928,24 @@ export function UserProfile({ address }: UserProfileProps) {
             <>
               <div className="mb-6">
                 <button
+                  onClick={async () => {
+                    // Manually retry fetching user data
+                    if (fetchUserDataRef.current) {
+                      setLoading(true)
+                      await fetchUserDataRef.current()
+                    }
+                  }}
+                  className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors mr-2"
+                >
+                  🔄 Retry Search
+                </button>
+                <button
                   onClick={() => {
                     window.location.reload()
                   }}
                   className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors mr-2"
                 >
-                  🔄 Refresh
+                  Refresh Page
                 </button>
                 <button
                   onClick={() => {
@@ -860,7 +958,7 @@ export function UserProfile({ address }: UserProfileProps) {
                 </button>
               </div>
               <p className="text-xs text-gray-500">
-                💡 If you created a profile on-chain, it may take 10-30 seconds for GraphQL to index it.
+                [NOTE] If you created a profile on-chain, it may take 10-30 seconds for GraphQL to index it. Try clicking "Retry Search" to check again.
               </p>
             </>
           )}
@@ -925,7 +1023,7 @@ export function UserProfile({ address }: UserProfileProps) {
             className="px-3 py-2 text-sm font-medium rounded-full border border-gray-300 text-gray-900 hover:border-primary hover:text-primary transition-colors"
             title="Refresh profile data"
           >
-            🔄
+            Refresh
           </button>
           {!isEditing ? (
             <button
@@ -967,7 +1065,7 @@ export function UserProfile({ address }: UserProfileProps) {
       </div>
 
       <div className="space-y-6">
-        {/* Wallet Address */}
+        {/* Wallet Address & Balance */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Wallet Address
@@ -975,6 +1073,15 @@ export function UserProfile({ address }: UserProfileProps) {
           <p className="text-sm text-gray-900 font-mono bg-gray-50 px-3 py-2 rounded-lg">
             {address}
           </p>
+          {walletBalance !== null && (
+            <p className="mt-1 text-xs text-gray-600">
+              Balance:{' '}
+              <span className="font-semibold text-primary">
+                {Number(walletBalance).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+              </span>{' '}
+              TRUST
+            </p>
+          )}
         </div>
 
         {/* Trust Score & Stats */}
@@ -1209,6 +1316,16 @@ export function UserProfile({ address }: UserProfileProps) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Worker Notifications Section */}
+      <div className="mt-8">
+        <WorkerNotifications />
+      </div>
+
+      {/* Completed Jobs Section */}
+      <div className="mt-8">
+        <CompletedJobs />
       </div>
     </div>
     </>
