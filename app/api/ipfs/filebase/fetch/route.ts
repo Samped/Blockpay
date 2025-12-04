@@ -19,7 +19,7 @@ const s3Client = new S3Client({
     accessKeyId: process.env.FILEBASE_ACCESS_KEY_ID || '',
     secretAccessKey: process.env.FILEBASE_SECRET_ACCESS_KEY || '',
   },
-  forcePathStyle: false,
+  forcePathStyle: true, // Use path-style URLs to avoid DNS issues with bucket name in domain
 })
 
 /**
@@ -169,7 +169,7 @@ export async function GET(request: NextRequest) {
                 
                 if (deadlineMatch) {
                   matches = true
-                  console.log(`✅ Deadline match found: ${metadataDeadlineNum} vs ${deadlineNum} (diff: ${deadlineDiff}s)`)
+                  console.log(`[SUCCESS] Deadline match found: ${metadataDeadlineNum} vs ${deadlineNum} (diff: ${deadlineDiff}s)`)
                 }
               }
               
@@ -189,7 +189,7 @@ export async function GET(request: NextRequest) {
               }
 
               if (matches) {
-                console.log(`✅ Found matching job metadata in Filebase:`, metadata)
+                console.log(`[SUCCESS] Found matching job metadata in Filebase:`, metadata)
                 return NextResponse.json({
                   success: true,
                   metadata,
@@ -207,7 +207,7 @@ export async function GET(request: NextRequest) {
                   ...metadata,
                   cid: obj.Key,
                 })
-                console.log(`✅ Found matching submission metadata in Filebase:`, metadata)
+                console.log(`[SUCCESS] Found matching submission metadata in Filebase:`, metadata)
               }
             }
           } catch (parseErr: any) {
