@@ -13,11 +13,11 @@ export async function compressAndWatermark(
   opts: ImageOptions = {}
 ): Promise<Buffer> {
   const {
-    maxWidth = 1200, // Reduced from 2000 for lower quality previews
-    maxHeight = 1200, // Reduced from 2000 for lower quality previews
-    quality = 55, // Reduced from 80 for lower quality previews
+    maxWidth = 600, // Much lower for previews to prevent stealing
+    maxHeight = 600, // Much lower for previews to prevent stealing
+    quality = 15, // Much lower quality for previews (15% instead of 30%)
     watermarkText = 'Blockpay – preview',
-    watermarkOpacity = 0.6, // Increased opacity for better visibility
+    watermarkOpacity = 0.8, // Higher opacity for better theft prevention
   } = opts
 
   let image = sharp(buffer)
@@ -46,19 +46,22 @@ export async function compressAndWatermark(
   const baseHeight = resizedMeta.height ?? maxHeight
   
   const pixelReduction = ((1 - (baseWidth * baseHeight) / (originalWidth * originalHeight)) * 100).toFixed(1)
-  console.log(`[Image] ✅ Resized to: ${baseWidth}x${baseHeight} (reduced by ${pixelReduction}% pixels)`)
-  console.log(`[Image] 📊 Size: ${originalWidth}x${originalHeight} → ${baseWidth}x${baseHeight}`)
+  console.log(`[Image] [SUCCESS] Resized to: ${baseWidth}x${baseHeight} (reduced by ${pixelReduction}% pixels)`)
+  console.log(`[Image] [STATS] Size: ${originalWidth}x${originalHeight} → ${baseWidth}x${baseHeight}`)
   
   // Use the resized image
   image = resizedSharp
 
   // Create a tiled watermark pattern that covers the entire image
   // Use a single large SVG with all watermark text elements positioned correctly
-  const spacingX = Math.max(200, Math.min(300, Math.floor(baseWidth / 4))) // Spacing between watermarks
-  const spacingY = Math.max(100, Math.min(150, Math.floor(baseHeight / 5))) // Spacing between watermarks
+  // Keep spacing similar but make the text itself smaller so it's less visually dominant
+  const spacingX = Math.max(150, Math.min(250, Math.floor(baseWidth / 5)))
+  const spacingY = Math.max(80, Math.min(120, Math.floor(baseHeight / 6)))
   
-  // Calculate font size
-  const fontSize = Math.max(32, Math.min(48, Math.floor(spacingX / 6)))
+  // Calculate font size - REDUCED so watermark letters are smaller / less intrusive
+  // Previously we used roughly spacingX / 5 with a minimum of 40.
+  // Now we shrink it by ~40% and allow smaller minimum.
+  const fontSize = Math.max(22, Math.min(40, Math.floor(spacingX / 7)))
   
   console.log(`[Watermark] Creating tiled watermark: ${baseWidth}x${baseHeight}, spacing: ${spacingX}x${spacingY}, fontSize: ${fontSize}`)
   
@@ -85,8 +88,10 @@ export async function compressAndWatermark(
             font-size="${fontSize}" 
             dominant-baseline="middle" 
             text-anchor="middle" 
-            fill="white" 
+            fill="#ffffff" 
             fill-opacity="${watermarkOpacity}" 
+            stroke="#000000"
+            stroke-width="2"
             font-family="Arial, Helvetica, sans-serif"
             font-weight="bold"
             transform="rotate(-45 ${centerX} ${centerY})"
@@ -117,7 +122,7 @@ export async function compressAndWatermark(
     .png()
     .toBuffer()
 
-  console.log(`[Watermark] ✅ Watermark overlay created: ${baseWidth}x${baseHeight}, ${watermarkOverlay.length} bytes, ${watermarkTexts.length} watermarks`)
+  console.log(`[Watermark] [SUCCESS] Watermark overlay created: ${baseWidth}x${baseHeight}, ${watermarkOverlay.length} bytes, ${watermarkTexts.length} watermarks`)
 
   // Composite the tiled watermark overlay onto the image
   const watermarkedImage = await image
@@ -140,10 +145,10 @@ export async function compressAndWatermark(
   
   const finalMeta = await sharp(final).metadata()
   const sizeReduction = ((1 - final.length / originalSize) * 100).toFixed(1)
-  console.log(`[Watermark] ✅ Final image: ${finalMeta.width}x${finalMeta.height}, ${(final.length / 1024).toFixed(1)}KB, format: ${finalMeta.format}, quality: ${quality}`)
-  console.log(`[Watermark] ✅ Size reduction: ${(originalSize / 1024).toFixed(1)}KB → ${(final.length / 1024).toFixed(1)}KB (${sizeReduction}% smaller)`)
-  console.log(`[Watermark] ✅ Dimensions: ${originalWidth}x${originalHeight} → ${finalMeta.width}x${finalMeta.height}`)
-  console.log(`[Watermark] ✅ Created ${watermarkTexts.length} watermark instances across the image`)
+  console.log(`[Watermark] [SUCCESS] Final image: ${finalMeta.width}x${finalMeta.height}, ${(final.length / 1024).toFixed(1)}KB, format: ${finalMeta.format}, quality: ${quality}`)
+  console.log(`[Watermark] [SUCCESS] Size reduction: ${(originalSize / 1024).toFixed(1)}KB → ${(final.length / 1024).toFixed(1)}KB (${sizeReduction}% smaller)`)
+  console.log(`[Watermark] [SUCCESS] Dimensions: ${originalWidth}x${originalHeight} → ${finalMeta.width}x${finalMeta.height}`)
+  console.log(`[Watermark] [SUCCESS] Created ${watermarkTexts.length} watermark instances across the image`)
 
   return final
 }
