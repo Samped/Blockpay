@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useAccount } from 'wagmi'
 import { useJobPool } from '@/hooks/useJobPool'
+import { useUserAtom } from '@/hooks/useUserAtom'
 import { uploadToIPFS as uploadFilebaseToIPFS } from '@/frontend/uploadToIPFS'
 
 interface SubmissionFormProps {
@@ -14,18 +15,21 @@ interface SubmissionFormProps {
 export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormProps) {
   const { address, isConnected } = useAccount()
   const { submitWork, isWriting, isConfirming, isConfirmed, hash, writeError } = useJobPool()
+  const { userAtomId, loading: userAtomLoading } = useUserAtom()
   
   const [formData, setFormData] = useState({
     description: '',
-    previewFile: null as File | null,
+    // Single source file: we'll store this as full-res, and also generate a low-res watermarked preview from it
+    file: null as File | null,
   })
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [step, setStep] = useState<'form' | 'uploading' | 'creating' | 'success'>('form')
 
-  // Store submission metadata and preview CID for later retrieval
+  // Store submission metadata and CIDs for later retrieval
   const [submissionMetadata, setSubmissionMetadata] = useState<{
     previewCID: string
+    fullResCID: string
     metadataCID: string
     metadata: any
   } | null>(null)
@@ -39,6 +43,7 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
         jobId: jobId.toString(),
         worker: address,
         previewCID: submissionMetadata.previewCID,
+        fullResCID: submissionMetadata.fullResCID,
         metadataCID: submissionMetadata.metadataCID,
         metadata: submissionMetadata.metadata,
         transactionHash: hash,
@@ -52,6 +57,7 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
         jobId: jobId.toString(),
         worker: address,
         previewCID: submissionMetadata.previewCID,
+        fullResCID: submissionMetadata.fullResCID,
         metadataCID: submissionMetadata.metadataCID,
         metadata: submissionMetadata.metadata,
         transactionHash: hash,
@@ -77,7 +83,7 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setFormData({ ...formData, previewFile: e.target.files[0] })
+      setFormData({ ...formData, file: e.target.files[0] })
     }
   }
 
@@ -88,8 +94,21 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
       return
     }
 
-    if (!formData.previewFile) {
-      setError('Please upload a preview image')
+    // Check if user has created a profile atom
+    if (userAtomLoading) {
+      setError('Checking your profile...')
+      return
+    }
+
+    if (!userAtomId) {
+      setError('Please create your profile first to submit work')
+      // Show the user atom creation modal
+      window.dispatchEvent(new CustomEvent('showCreateProfileModal'))
+      return
+    }
+
+    if (!formData.file) {
+      setError('Please upload your work image')
       return
     }
 
@@ -97,19 +116,29 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
     setStep('uploading')
 
     try {
-      // Step 1: Upload preview image to IPFS (via Filebase backend)
-      const previewResult = await uploadFilebaseToIPFS(formData.previewFile, {
+      // Step 1: Upload full resolution image to IPFS - NO compression/watermarking
+      // This is the main work that will later be delivered to the creator
+      const fullResResult = await uploadFilebaseToIPFS(formData.file, {
+        uploader: address,
+        type: 'submission-full-res',
+        jobId: jobId.toString(),
+      })
+      console.log('Full resolution image uploaded to IPFS (Filebase):', fullResResult.cid)
+
+      // Step 2: Upload a preview version of the same image - backend will compress & watermark it
+      const previewResult = await uploadFilebaseToIPFS(formData.file, {
         uploader: address,
         type: 'submission-preview',
         jobId: jobId.toString(),
       })
-      console.log('Preview uploaded to IPFS (Filebase):', previewResult.cid)
+      console.log('Preview (watermarked) uploaded to IPFS (Filebase):', previewResult.cid)
 
-      // Step 2: Upload submission metadata to IPFS
+      // Step 3: Upload submission metadata to IPFS
       const submissionMetadata = {
         jobId: jobId.toString(),
         description: formData.description,
         previewCID: previewResult.cid,
+        fullResCID: fullResResult.cid,
         createdAt: new Date().toISOString(),
       }
 
@@ -130,6 +159,7 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
       // Store metadata for later (will be saved to localStorage after transaction confirmation)
       setSubmissionMetadata({
         previewCID: previewResult.cid,
+        fullResCID: fullResResult.cid,
         metadataCID: metadataResult.cid,
         metadata: submissionMetadata,
       })
@@ -180,7 +210,7 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Preview Image *
+          Artwork / Image *
         </label>
         <input
           type="file"
@@ -189,11 +219,14 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
           onChange={handleFileChange}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
         />
-        {formData.previewFile && (
+        {formData.file && (
           <p className="mt-1 text-xs text-gray-500">
-            Selected: {formData.previewFile.name}
+            Selected: {formData.file.name}
           </p>
         )}
+        <p className="mt-1 text-xs text-gray-400">
+          We’ll store this as the full‑resolution work, and automatically generate a low‑quality watermarked preview for the creator to review.
+        </p>
       </div>
 
       <div>
