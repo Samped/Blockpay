@@ -66,30 +66,47 @@ export async function POST(request: NextRequest) {
     let finalBuffer = buffer
     if (mime.startsWith('image/')) {
       // For submission previews, use lower quality and smaller dimensions
+      // For full resolution images, skip compression/watermarking
       const uploadType = formData.get('type') as string
-      const isSubmissionPreview = uploadType?.includes('submission')
+      const isSubmissionPreview = uploadType?.includes('submission-preview')
+      const isFullRes = uploadType?.includes('submission-full-res')
       
-      console.log(`[Upload] Image detected: type="${uploadType}", isSubmissionPreview=${isSubmissionPreview}`)
+      console.log(`[Upload] Image detected: type="${uploadType}", isSubmissionPreview=${isSubmissionPreview}, isFullRes=${isFullRes}`)
+      console.log(`[Upload] ⚠️ CRITICAL: If isFullRes=${isFullRes}, image will be uploaded WITHOUT watermark`)
       
-      const opts = {
-        maxWidth: isSubmissionPreview 
-          ? (Number(process.env.IMAGE_MAX_WIDTH) || 1200) // Lower for previews
-          : (Number(process.env.IMAGE_MAX_WIDTH) || 2000),
-        maxHeight: isSubmissionPreview
-          ? (Number(process.env.IMAGE_MAX_HEIGHT) || 1200) // Lower for previews
-          : (Number(process.env.IMAGE_MAX_HEIGHT) || 2000),
-        quality: isSubmissionPreview
-          ? (Number(process.env.IMAGE_QUALITY) || 55) // Lower quality for previews
-          : (Number(process.env.IMAGE_QUALITY) || 80),
-        watermarkText: process.env.WATERMARK_TEXT || 'Blockpay – preview',
-        watermarkOpacity: Number(process.env.WATERMARK_OPACITY) || 0.6,
+      // Skip processing for full resolution images - upload as-is
+      if (isFullRes) {
+        console.log(`[Upload] ✅✅✅ FULL RESOLUTION IMAGE DETECTED ✅✅✅`)
+        console.log(`[Upload] ✅ Uploading original without ANY processing (no compression, no watermark)`)
+        console.log(`[Upload] ✅ Original buffer size: ${buffer.length} bytes`)
+        console.log(`[Upload] ✅ This image will be stored EXACTLY as received - NO watermark will be added`)
+        // Keep original buffer, no processing - upload exactly as received
+        finalBuffer = buffer
+        console.log(`[Upload] ✅ Full resolution image will be uploaded as-is: ${finalBuffer.length} bytes`)
+        console.log(`[Upload] ✅✅✅ END FULL RESOLUTION UPLOAD ✅✅✅`)
+      } else {
+        const opts = {
+          maxWidth: isSubmissionPreview 
+            ? (Number(process.env.IMAGE_MAX_WIDTH) || 600) // Much lower for previews to prevent stealing
+            : (Number(process.env.IMAGE_MAX_WIDTH) || 2000),
+          maxHeight: isSubmissionPreview
+            ? (Number(process.env.IMAGE_MAX_HEIGHT) || 600) // Much lower for previews to prevent stealing
+            : (Number(process.env.IMAGE_MAX_HEIGHT) || 2000),
+          quality: isSubmissionPreview
+            ? (Number(process.env.IMAGE_QUALITY) || 15) // Much lower quality for previews (15% instead of 30%)
+            : (Number(process.env.IMAGE_QUALITY) || 80),
+          watermarkText: process.env.WATERMARK_TEXT || 'Blockpay – preview',
+          watermarkOpacity: isSubmissionPreview
+            ? (Number(process.env.WATERMARK_OPACITY) || 0.8) // More visible watermark for previews (80% opacity)
+            : (Number(process.env.WATERMARK_OPACITY) || 0.6),
+        }
+        
+        console.log(`[Upload] Processing image with options:`, opts)
+        
+        finalBuffer = await compressAndWatermark(buffer, opts)
+        
+        console.log(`[Upload] [SUCCESS] Image processed: ${buffer.length} bytes → ${finalBuffer.length} bytes`)
       }
-      
-      console.log(`[Upload] Processing image with options:`, opts)
-      
-      finalBuffer = await compressAndWatermark(buffer, opts)
-      
-      console.log(`[Upload] ✅ Image processed: ${buffer.length} bytes → ${finalBuffer.length} bytes`)
     }
 
     // 3) Compute IPFS CID locally
