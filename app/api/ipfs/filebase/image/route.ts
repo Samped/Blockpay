@@ -18,7 +18,7 @@ const s3Client = new S3Client({
     accessKeyId: process.env.FILEBASE_ACCESS_KEY_ID || '',
     secretAccessKey: process.env.FILEBASE_SECRET_ACCESS_KEY || '',
   },
-  forcePathStyle: false,
+  forcePathStyle: true, // Use path-style URLs to avoid DNS issues with bucket name in domain
 })
 
 /**
@@ -75,9 +75,9 @@ export async function GET(request: NextRequest) {
       // Get content type from response or default to image
       const contentType = response.ContentType || 'image/webp'
       
-      console.log(`[Image Proxy] ✅ Successfully fetched image: ${contentType}, ${body.length} bytes`)
+      console.log(`[Image Proxy] [SUCCESS] Successfully fetched image: ${contentType}, ${body.length} bytes`)
 
-      // Return the image with proper headers
+      // Return the image with proper headers to prevent downloads
       return new NextResponse(body, {
         status: 200,
         headers: {
@@ -85,49 +85,89 @@ export async function GET(request: NextRequest) {
           'Content-Length': body.length.toString(),
           'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
           'Access-Control-Allow-Origin': '*', // Allow CORS
+          'Content-Disposition': 'inline', // Prevent download, display inline only
+          'X-Content-Type-Options': 'nosniff', // Prevent MIME type sniffing
         },
       })
     } catch (err: any) {
+      const cleanCid = cid.replace(/^ipfs:\/\//, '').replace(/^\/ipfs\//, '')
       console.error('[Image Proxy] Error fetching image from Filebase:', {
         error: err.message,
         code: err.Code,
         name: err.name,
-        cid: cid.replace(/^ipfs:\/\//, '').replace(/^\/ipfs\//, ''),
+        cid: cleanCid,
       })
       
-      // Try IPFS gateway as fallback
-      try {
-        const cleanCid = cid.replace(/^ipfs:\/\//, '').replace(/^\/ipfs\//, '')
-        const gatewayUrl = `https://${cleanCid}.ipfs.filebase.io`
-        console.log(`Trying Filebase gateway as fallback: ${gatewayUrl}`)
-        
-        const response = await fetch(gatewayUrl, {
-          headers: {
-            'Accept': 'image/*',
-          },
-        })
-        
-        if (response.ok) {
-          const imageBuffer = await response.arrayBuffer()
-          const contentType = response.headers.get('content-type') || 'image/webp'
+      // Try multiple IPFS gateways as fallback
+      const gatewayUrls = [
+        `https://${cleanCid}.ipfs.filebase.io`,
+        `https://${cleanCid}.ipfs.w3s.link`,
+        `https://ipfs.io/ipfs/${cleanCid}`,
+        `https://cloudflare-ipfs.com/ipfs/${cleanCid}`,
+        `https://dweb.link/ipfs/${cleanCid}`,
+      ]
+      
+      for (const gatewayUrl of gatewayUrls) {
+        try {
+          console.log(`[Image Proxy] Trying gateway fallback: ${gatewayUrl}`)
           
-          return new NextResponse(imageBuffer, {
-            status: 200,
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+          
+          const response = await fetch(gatewayUrl, {
             headers: {
-              'Content-Type': contentType,
-              'Content-Length': imageBuffer.byteLength.toString(),
-              'Cache-Control': 'public, max-age=3600',
-              'Access-Control-Allow-Origin': '*',
+              'Accept': 'image/*',
             },
+            signal: controller.signal,
           })
+          
+          clearTimeout(timeoutId)
+          
+          if (response.ok) {
+            const contentType = response.headers.get('content-type')
+            
+            // Only proceed if it's actually an image
+            if (contentType && contentType.startsWith('image/')) {
+              const imageBuffer = await response.arrayBuffer()
+              
+              console.log(`[Image Proxy] [SUCCESS] Fetched from gateway: ${gatewayUrl}, ${imageBuffer.byteLength} bytes`)
+              
+              return new NextResponse(imageBuffer, {
+                status: 200,
+                headers: {
+                  'Content-Type': contentType,
+                  'Content-Length': imageBuffer.byteLength.toString(),
+                  'Cache-Control': 'public, max-age=3600',
+                  'Access-Control-Allow-Origin': '*',
+                  'Content-Disposition': 'inline', // Prevent download, display inline only
+                  'X-Content-Type-Options': 'nosniff', // Prevent MIME type sniffing
+                },
+              })
+            } else {
+              console.warn(`[Image Proxy] Gateway returned non-image content type: ${contentType}`)
+            }
+          } else {
+            console.warn(`[Image Proxy] Gateway returned status ${response.status} for ${gatewayUrl}`)
+          }
+        } catch (gatewayErr: any) {
+          if (gatewayErr.name === 'AbortError') {
+            console.warn(`[Image Proxy] Gateway timeout: ${gatewayUrl}`)
+          } else {
+            console.warn(`[Image Proxy] Gateway error for ${gatewayUrl}:`, gatewayErr.message)
+          }
+          // Continue to next gateway
         }
-      } catch (gatewayErr) {
-        console.error('Gateway fallback also failed:', gatewayErr)
       }
       
+      // All gateways failed
+      console.error(`[Image Proxy] All gateways failed for CID: ${cleanCid}`)
       return NextResponse.json(
-        { error: err.message || 'Failed to fetch image from Filebase' },
-        { status: 500 }
+        { 
+          error: 'Failed to fetch image from Filebase and all IPFS gateways',
+          cid: cleanCid,
+          message: err.message || 'Image not found'
+        },
+        { status: 404 }
       )
     }
   } catch (err: any) {
