@@ -102,9 +102,9 @@ export function useJobPool() {
           value: requiredValue,
           account: address,
         })
-        console.log('✅ Transaction simulation successful')
+        console.log('[SUCCESS] Transaction simulation successful')
       } catch (simError: any) {
-        console.error('❌ Transaction simulation failed:', simError)
+        console.error('[ERROR] Transaction simulation failed:', simError)
         // Try to decode the error
         let errorMessage = simError.message || 'Transaction would revert'
         
@@ -176,9 +176,9 @@ export function useJobPool() {
           value: requiredValue,
           account: address,
         })
-        console.log('✅ Submission transaction simulation successful')
+        console.log('[SUCCESS] Submission transaction simulation successful')
       } catch (simError: any) {
-        console.error('❌ Submission transaction simulation failed:', simError)
+        console.error('[ERROR] Submission transaction simulation failed:', simError)
         let errorMessage = simError.message || 'Transaction would revert'
         
         // Check for common revert reasons
@@ -190,6 +190,18 @@ export function useJobPool() {
           errorMessage = 'Job deadline has passed'
         } else if (simError.message?.includes('Send 2 * atomCreationFee')) {
           errorMessage = `Insufficient funds. Required: ${formatTrustAmount(requiredValue)} TRUST (2 × 0.1 TRUST atom creation fee)`
+        } else if (simError.message?.includes('Submission atom creation failed')) {
+          errorMessage = 'Failed to create submission atom. This might be due to insufficient deposit amount or MultiVault requirements. Please check that you have enough funds and try again.'
+        } else if (simError.message?.includes('createAtoms failed')) {
+          errorMessage = 'MultiVault rejected atom creation. This might be due to minimum deposit requirements. Please contact support if this persists.'
+        }
+        
+        // Try to extract the actual revert reason if available
+        if (simError.cause?.data) {
+          console.error('Detailed error data:', simError.cause.data)
+        }
+        if (simError.details) {
+          console.error('Error details:', simError.details)
         }
         
         return { success: false, error: errorMessage }
@@ -244,13 +256,23 @@ export function useJobPool() {
           value: requiredValue,
           account: address,
         })
-        console.log('✅ Accept work transaction simulation successful')
+        console.log('[SUCCESS] Accept work transaction simulation successful')
       } catch (simError: any) {
-        console.error('❌ Accept work transaction simulation failed:', simError)
+        console.error('[ERROR] Accept work transaction simulation failed:', simError)
         let errorMessage = simError.message || 'Transaction would revert'
         
         if (simError.message?.includes('Send 2 * atomCreationFee')) {
           errorMessage = `Insufficient funds. Required: ${formatTrustAmount(requiredValue)} TRUST (2 × 0.1 TRUST atom creation fee)`
+        } else if (simError.message?.includes('Accept too soon')) {
+          errorMessage = 'You must wait at least 1 hour after a submission is made before you can accept it. This is a security feature to protect submitters from front-running attacks. Please wait and try again later.'
+        } else if (simError.message?.includes('Already accepted')) {
+          errorMessage = 'This submission has already been accepted.'
+        } else if (simError.message?.includes('Withdrawn')) {
+          errorMessage = 'This submission has been withdrawn by the worker.'
+        } else if (simError.message?.includes('Only creator')) {
+          errorMessage = 'Only the job creator can accept work.'
+        } else if (simError.message?.includes('Job not active')) {
+          errorMessage = 'This job is no longer active and cannot accept new submissions.'
         }
         
         return { success: false, error: errorMessage }
@@ -395,7 +417,7 @@ export function useJobPool() {
       // Try to fetch job metadata from multiple sources
       let metadataLoaded = false
       
-      console.log(`🔍 Fetching metadata for Job #${jobId.toString()}`)
+      console.log(`[INFO] Fetching metadata for Job #${jobId.toString()}`)
       console.log(`   Creator: ${job.creator}`)
       console.log(`   Payment: ${job.payment.toString()}`)
       console.log(`   Deadline: ${job.deadline.toString()} (${new Date(Number(job.deadline) * 1000).toLocaleString()})`)
@@ -418,7 +440,7 @@ export function useJobPool() {
             job.budget = storedMetadata.budget || job.payment.toString()
             job.createdAt = storedMetadata.createdAt || new Date().toISOString()
             metadataLoaded = true
-            console.log(`✅ Job ${jobId.toString()} metadata loaded from localStorage (direct key)`)
+            console.log(`[SUCCESS] Job ${jobId.toString()} metadata loaded from localStorage (direct key)`)
             console.log(`   Title: ${job.title}`)
             console.log(`   Category: ${job.category}`)
           }
@@ -471,7 +493,7 @@ export function useJobPool() {
                   job.budget = storedMetadata.budget || job.payment.toString()
                   job.createdAt = storedMetadata.createdAt || new Date().toISOString()
                   metadataLoaded = true
-                  console.log(`✅ Job ${jobId.toString()} metadata loaded from localStorage (matched by deadline/budget)`)
+                  console.log(`[SUCCESS] Job ${jobId.toString()} metadata loaded from localStorage (matched by deadline/budget)`)
                   console.log(`   Title: ${job.title}`)
                   console.log(`   Description: ${job.description}`)
                   console.log(`   Category: ${job.category}`)
@@ -512,7 +534,7 @@ export function useJobPool() {
               job.budget = metadata.budget || job.payment.toString()
               job.createdAt = metadata.createdAt || new Date().toISOString()
               metadataLoaded = true
-              console.log(`✅ Job ${jobId.toString()} metadata loaded from Filebase API`)
+              console.log(`[SUCCESS] Job ${jobId.toString()} metadata loaded from Filebase API`)
               console.log(`   Title: ${job.title}`)
               console.log(`   Description: ${job.description}`)
               console.log(`   Category: ${job.category}`)
@@ -567,7 +589,7 @@ export function useJobPool() {
                       job.budget = metadata.budget || job.payment.toString()
                       job.createdAt = metadata.createdAt || new Date().toISOString()
                       metadataLoaded = true
-                      console.log(`✅ Job ${jobId.toString()} metadata loaded from IPFS`)
+                      console.log(`[SUCCESS] Job ${jobId.toString()} metadata loaded from IPFS`)
                       break
                     }
                   }
@@ -595,7 +617,7 @@ export function useJobPool() {
         job.title = `Job #${jobId.toString()}`
       }
 
-      console.log(`✅ Job ${jobId.toString()} loaded with title: "${job.title}"`)
+      console.log(`[SUCCESS] Job ${jobId.toString()} loaded with title: "${job.title}"`)
       return job
     } catch (error) {
       console.error('Error fetching job:', error)
