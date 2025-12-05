@@ -11,9 +11,13 @@ import {
 } from './intuitionContract'
 
 export interface Atom {
-  id: string
+  id?: string
+  term_id?: string
   type: string
   data?: Record<string, any>
+  label?: string
+  created_at?: string
+  creator_id?: string
 }
 
 export interface Triple {
