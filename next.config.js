@@ -17,18 +17,29 @@ const nextConfig = {
       }
     }
     
-    // Ignore React Native modules that MetaMask SDK tries to import
-    // These are not needed for web builds
+    // Ignore React Native modules and optional dependencies that MetaMask SDK/WalletConnect try to import
+    // These are not needed for web builds (applies to both server and client)
     config.resolve.alias = {
-      ...config.resolve.alias,
+      ...(config.resolve.alias || {}),
       '@react-native-async-storage/async-storage': false,
+      'pino-pretty': false,
     }
     
-    // Ignore optional React Native dependencies
+    // Ignore optional dependencies (for both server and client builds)
     config.resolve.fallback = {
-      ...config.resolve.fallback,
+      ...(config.resolve.fallback || {}),
       '@react-native-async-storage/async-storage': false,
+      'pino-pretty': false,
     }
+    
+    // Add plugin to ignore optional dependencies using webpack's IgnorePlugin
+    const webpack = require('webpack')
+    config.plugins = config.plugins || []
+    config.plugins.push(
+      new webpack.IgnorePlugin({
+        resourceRegExp: /^pino-pretty$/,
+      })
+    )
     
     return config
   },

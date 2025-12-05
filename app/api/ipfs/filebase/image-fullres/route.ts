@@ -75,11 +75,11 @@ export async function GET(request: NextRequest) {
       console.log(`[FullRes Image Proxy]    - CID: ${cleanCid}`)
 
       // Convert Uint8Array to Buffer for NextResponse compatibility
-      const buffer = Buffer.from(body)
+      const buffer = Buffer.from(body) as Buffer
 
       // Return the image EXACTLY as stored - NO processing, NO watermarking, NO compression
       // This is the original file that was uploaded with type='submission-full-res'
-      return new NextResponse(buffer, {
+      return new NextResponse(buffer as BodyInit, {
         status: 200,
         headers: {
           'Content-Type': contentType,

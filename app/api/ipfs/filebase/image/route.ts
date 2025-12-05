@@ -77,12 +77,15 @@ export async function GET(request: NextRequest) {
       
       console.log(`[Image Proxy] [SUCCESS] Successfully fetched image: ${contentType}, ${body.length} bytes`)
 
+      // Convert Uint8Array to Buffer for NextResponse compatibility
+      const buffer = Buffer.from(body) as Buffer
+
       // Return the image with proper headers to prevent downloads
-      return new NextResponse(body, {
+      return new NextResponse(buffer as BodyInit, {
         status: 200,
         headers: {
           'Content-Type': contentType,
-          'Content-Length': body.length.toString(),
+          'Content-Length': buffer.length.toString(),
           'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
           'Access-Control-Allow-Origin': '*', // Allow CORS
           'Content-Disposition': 'inline', // Prevent download, display inline only
@@ -129,14 +132,15 @@ export async function GET(request: NextRequest) {
             // Only proceed if it's actually an image
             if (contentType && contentType.startsWith('image/')) {
               const imageBuffer = await response.arrayBuffer()
+              const buffer = Buffer.from(imageBuffer)
               
-              console.log(`[Image Proxy] [SUCCESS] Fetched from gateway: ${gatewayUrl}, ${imageBuffer.byteLength} bytes`)
+              console.log(`[Image Proxy] [SUCCESS] Fetched from gateway: ${gatewayUrl}, ${buffer.length} bytes`)
               
-              return new NextResponse(imageBuffer, {
+              return new NextResponse(buffer as BodyInit, {
                 status: 200,
                 headers: {
                   'Content-Type': contentType,
-                  'Content-Length': imageBuffer.byteLength.toString(),
+                  'Content-Length': buffer.length.toString(),
                   'Cache-Control': 'public, max-age=3600',
                   'Access-Control-Allow-Origin': '*',
                   'Content-Disposition': 'inline', // Prevent download, display inline only
