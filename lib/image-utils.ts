@@ -12,6 +12,8 @@ export async function compressAndWatermark(
   buffer: Buffer | Buffer<ArrayBufferLike>,
   opts: ImageOptions = {}
 ): Promise<Buffer> {
+  // Convert buffer to standard Buffer type to avoid TypeScript issues
+  const standardBuffer: Buffer = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as ArrayBufferLike)
   const {
     maxWidth = 600, // Much lower for previews to prevent stealing
     maxHeight = 600, // Much lower for previews to prevent stealing
@@ -20,11 +22,11 @@ export async function compressAndWatermark(
     watermarkOpacity = 0.8, // Higher opacity for better theft prevention
   } = opts
 
-  let image = sharp(buffer)
+  let image = sharp(standardBuffer)
   const meta = await image.metadata()
   const originalWidth = meta.width ?? maxWidth
   const originalHeight = meta.height ?? maxHeight
-  const originalSize = buffer.length
+  const originalSize = standardBuffer.length
 
   console.log(`[Image] 📥 Original: ${originalWidth}x${originalHeight}, ${(originalSize / 1024).toFixed(1)}KB, Target max: ${maxWidth}x${maxHeight}, Quality: ${quality}`)
 
