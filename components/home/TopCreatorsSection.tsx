@@ -7,7 +7,7 @@ import { intuitionClient, TrustScore, Atom } from '@/lib/intuitionClient'
 
 interface CreatorData extends TrustScore {
   address?: string
-  atom?: Atom
+  atom?: Atom | null
   completedJobs?: number
 }
 
