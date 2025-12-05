@@ -294,10 +294,10 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
             MozUserSelect: 'none',
             msUserSelect: 'none',
             pointerEvents: 'none', // Prevent direct interaction with image
-            WebkitUserDrag: 'none',
-            KhtmlUserDrag: 'none',
-            MozUserDrag: 'none',
-            OUserDrag: 'none',
+            WebkitUserDrag: 'none' as any,
+            KhtmlUserDrag: 'none' as any,
+            MozUserDrag: 'none' as any,
+            OUserDrag: 'none' as any,
             userDrag: 'none',
           }}
         />
