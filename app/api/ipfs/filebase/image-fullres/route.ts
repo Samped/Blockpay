@@ -74,13 +74,16 @@ export async function GET(request: NextRequest) {
       console.log(`[FullRes Image Proxy]    - Size: ${body.length} bytes`)
       console.log(`[FullRes Image Proxy]    - CID: ${cleanCid}`)
 
+      // Convert Uint8Array to Buffer for NextResponse compatibility
+      const buffer = Buffer.from(body)
+
       // Return the image EXACTLY as stored - NO processing, NO watermarking, NO compression
       // This is the original file that was uploaded with type='submission-full-res'
-      return new NextResponse(body, {
+      return new NextResponse(buffer, {
         status: 200,
         headers: {
           'Content-Type': contentType,
-          'Content-Length': body.length.toString(),
+          'Content-Length': buffer.length.toString(),
           'Cache-Control': 'no-cache, no-store, must-revalidate', // Don't cache - ensure fresh image
           'Pragma': 'no-cache',
           'Expires': '0',
