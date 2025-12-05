@@ -408,7 +408,9 @@ export function JobPoolSection() {
                             </span>
                           </div>
                           <span className="text-xs text-gray-400 font-medium">
-                            {new Date(job.expirationDate || job.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            {(job.expirationDate || job.deadline) 
+                              ? new Date(job.expirationDate || job.deadline!).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                              : 'N/A'}
                           </span>
                         </div>
                       </div>
