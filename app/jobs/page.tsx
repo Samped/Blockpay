@@ -1,4 +1,4 @@
-a'use client'
+'use client'
 
 import { useState, useRef } from 'react'
 import { JobList } from '@/components/jobs/JobList'
