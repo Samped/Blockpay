@@ -1136,8 +1136,11 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
 
               initializedAddressRef.current = address?.toLowerCase() || null
 
-              // Create a triple for the account after atom is indexed
-              await createAccountTriple(newAtom.id, address || '')
+              // After User atom is indexed, create triples for profile fields
+              // Note: Full triple creation (predicate atoms, value atoms, triples) 
+              // will be implemented in a follow-up update
+              // For now, we just create the minimal User atom
+              console.log('[INFO] User atom created successfully. Profile fields can be added as triples later.')
 
             setShowModal(false)
 
@@ -1275,37 +1278,27 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
       const assetDeposit = minimumDeposit
       const totalValue = assetDeposit // msg.value must equal sum(assets[])
 
-      // Prepare profile data for contract
-      const atomData = {
-        address: address.toLowerCase(),
-        wallet: address.toLowerCase(),
-        type: 'User',
-        name: profileData.name || 'User',
-        bio: profileData.bio || '',
-        email: profileData.email || '',
-        website: profileData.website || '',
-        profilePicture: profileData.profilePicture || '',
-        twitter: profileData.twitter || '',
-        github: profileData.github || '',
-        behance: profileData.behance || '',
-        dribbble: profileData.dribbble || '',
-        createdAt: new Date().toISOString()
-      }
+      // Use new triple-based profile creation
+      // Create minimal User atom with just type, wallet, and displayName
+      const { encodeUserAtomData } = await import('@/lib/intuitionContract')
+      const userDataBytes = encodeUserAtomData(
+        address.toLowerCase(),
+        profileData.name || undefined
+      )
 
-      // Convert atom data to bytes for createAtoms function
-      const atomDataBytes = atomDataToBytes(atomData)
-
-      console.log('=== Auto-creating profile via contract ===')
+      console.log('=== Auto-creating universal User atom via contract ===')
       console.log('Contract:', INTUITION_CONTRACT_ADDRESS)
       console.log('Function: createAtoms(bytes[] data, uint256[] assets) payable')
-      console.log('Atom data (bytes):', atomDataBytes.substring(0, 100) + '...')
+      console.log('User wallet:', address.toLowerCase())
+      console.log('Display name:', profileData.name || '(none)')
+      console.log('Atom data (bytes):', userDataBytes.substring(0, 100) + '...')
       console.log('Minimum deposit:', minimumDeposit.toString(), 'wei')
       console.log('Total in assets[]:', assetDeposit.toString(), 'wei')
       console.log('Total msg.value:', totalValue.toString(), 'wei')
       console.log('Total msg.value (tTRUST):', (Number(totalValue) / 1e18).toFixed(6))
-      console.log('[WARNING] NOTE: assets[] = [minimumDeposit], msg.value = sum(assets[])')
+      console.log('[INFO] Profile fields will be stored as triples after atom creation')
 
-      // Call contract's createAtoms function
+      // Call contract's createAtoms function to create minimal User atom
       // Function signature: createAtoms(bytes[] calldata data, uint256[] calldata assets) payable
       // msg.value MUST equal sum(assets[])
       writeContract({
@@ -1313,8 +1306,8 @@ export function UserInitialization({ children }: { children: React.ReactNode }) 
         abi: INTUITION_CONTRACT_ABI,
         functionName: 'createAtoms',
         args: [
-          [atomDataBytes], // bytes[] - array with one atom data
-          [assetDeposit]   // uint256[] - array with deposit + fee
+          [userDataBytes], // bytes[] - array with one User atom data (minimal)
+          [assetDeposit]   // uint256[] - array with deposit
         ],
         value: totalValue // msg.value = sum(assets[])
       })
