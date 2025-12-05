@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { usePublicClient, useAccount } from 'wagmi'
 import { JOB_POOL_ADDRESS, JOB_POOL_ABI } from '@/lib/jobPoolContract'
 import { checkAtomIndexed } from '@/lib/checkAtomIndexed'
@@ -46,9 +46,20 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
   })
   const [indexStatus, setIndexStatus] = useState<IndexStatus>({})
   const [error, setError] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
+  const hasLoadedRef = useRef(false)
+
+  // Reset retry count and loaded flag when jobId changes
+  useEffect(() => {
+    setRetryCount(0)
+    setError(null)
+    setLoading(true)
+    hasLoadedRef.current = false
+  }, [jobId])
 
   useEffect(() => {
     let cancelled = false
+    let timeoutId: NodeJS.Timeout | null = null
 
     const fetchGraphData = async () => {
       if (!jobId) {
@@ -64,16 +75,31 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
         return
       }
 
+      // Don't fetch if we already have data and it's not a retry
+      if (hasLoadedRef.current && retryCount === 0) {
+        setLoading(false)
+        return
+      }
+
       setLoading(true)
       setError(null)
 
       // Add timeout to prevent infinite loading
-      const timeoutId = setTimeout(() => {
-        if (!cancelled) {
-          setError('Request timed out. Please refresh the page.')
+      timeoutId = setTimeout(() => {
+        if (!cancelled && retryCount < 3) {
+          console.log(`[INFO] Knowledge graph timeout, retrying (attempt ${retryCount + 1}/3)...`)
+          setError('Request timed out. The knowledge graph may still be indexing. Retrying automatically...')
+          // Automatically retry after a short delay by incrementing retry count
+          setTimeout(() => {
+            if (!cancelled) {
+              setRetryCount(prev => prev + 1)
+            }
+          }, 3000) // Retry after 3 seconds
+        } else if (!cancelled) {
+          setError('Request timed out after multiple attempts. The knowledge graph may still be indexing. Please check back later.')
           setLoading(false)
         }
-      }, 30000) // 30 second timeout
+      }, 60000) // 60 second timeout
 
       try {
         console.log('[INFO] Fetching knowledge graph for job:', jobId.toString())
@@ -274,14 +300,19 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
 
         setIndexStatus(statusChecks)
 
-        clearTimeout(timeoutId)
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
         setLoading(false)
+        hasLoadedRef.current = true // Mark as successfully loaded
+        setRetryCount(0) // Reset retry count on success
         console.log('[SUCCESS] Knowledge graph loaded successfully')
       } catch (err: any) {
         if (cancelled) return
         
         console.error('Error fetching knowledge graph data:', err)
-        clearTimeout(timeoutId)
+        if (timeoutId) clearTimeout(timeoutId)
         setError(err.message || 'Failed to load knowledge graph')
         setLoading(false)
       }
@@ -292,7 +323,7 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
     return () => {
       cancelled = true
     }
-  }, [publicClient, jobId, address])
+  }, [publicClient, jobId, address, retryCount])
 
   if (loading) {
     return (
@@ -306,12 +337,12 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
     )
   }
 
-  if (error) {
+  if (error && !loading) {
     return (
       <div className="bg-white rounded-2xl shadow-card p-6">
         <h3 className="text-xl font-bold text-gray-900 mb-4">Knowledge Graph</h3>
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-sm text-red-800">{error}</p>
+        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <p className="text-sm text-yellow-800">{error}</p>
         </div>
       </div>
     )
