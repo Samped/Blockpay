@@ -355,14 +355,9 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
                       size: blob.size,
                     })
                     if (blob.type.startsWith('image/')) {
-                      const reader = new FileReader()
-                      reader.onloadend = () => {
-                        setImageDataUrl(reader.result as string)
-                        setImageLoaded(true)
-                        setError(false)
-                        alert('Image loaded successfully via proxy!')
-                      }
-                      reader.readAsDataURL(blob)
+                      setImageLoaded(true)
+                      setError(false)
+                      alert('Image loaded successfully via proxy!')
                     } else {
                       alert(`Not an image: ${blob.type}. Size: ${blob.size} bytes`)
                     }
