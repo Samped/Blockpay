@@ -384,7 +384,62 @@ export function useJobPool() {
       // Check if job exists (creator should not be zero address)
       if (!result || !result[0] || result[0] === '0x0000000000000000000000000000000000000000') {
         console.warn(`Job ${jobId.toString()} does not exist (zero address creator)`)
-        return null
+        console.warn(`   Result:`, result)
+        console.warn(`   Result[0]:`, result?.[0])
+        
+        // Diagnostic: Check if jobAtomId exists (might indicate partial creation)
+        try {
+          const atomId = await publicClient.readContract({
+            address: JOB_POOL_ADDRESS as `0x${string}`,
+            abi: JOB_POOL_ABI,
+            functionName: 'jobAtomIds',
+            args: [jobId],
+          }) as `0x${string}`
+          
+          if (atomId && atomId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+            console.warn(`   ⚠️ Job atom ID exists (${atomId}) but job struct is missing - possible contract state inconsistency`)
+          } else {
+            console.warn(`   Job atom ID is also zero - job was never created`)
+          }
+        } catch (atomErr) {
+          console.warn(`   Could not check jobAtomId:`, atomErr)
+        }
+        
+        // Don't return null immediately - wait a bit and retry in case it's still being indexed
+        // Try multiple times with increasing delays
+        const maxRetries = 3
+        let retrySuccess = false
+        
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          const delay = Math.min(2000 * Math.pow(2, attempt), 10000) // 2s, 4s, 8s (max 10s)
+          console.log(`   Retrying job ${jobId.toString()} after ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+          
+          try {
+            result = await publicClient.readContract({
+              address: JOB_POOL_ADDRESS as `0x${string}`,
+              abi: JOB_POOL_ABI,
+              functionName: 'jobs',
+              args: [jobId],
+            })
+            console.log(`Job ${jobId.toString()} retry ${attempt + 1} result:`, result)
+            
+            if (result && result[0] && result[0] !== '0x0000000000000000000000000000000000000000') {
+              retrySuccess = true
+              console.log(`✅ Job ${jobId.toString()} found after retry ${attempt + 1}`)
+              break
+            }
+          } catch (retryErr) {
+            console.error(`Job ${jobId.toString()} retry ${attempt + 1} failed:`, retryErr)
+          }
+        }
+        
+        if (!retrySuccess) {
+          console.error(`Job ${jobId.toString()} still does not exist after ${maxRetries} retries`)
+          console.error(`   This job may have been cancelled, expired, or never successfully created.`)
+          console.error(`   Check the contract directly or verify the transaction hash if you created this job.`)
+          return null
+        }
       }
 
       // Result is a tuple: [creator, payment, deadline, status, hasSubmission, worker, submissionHash]
