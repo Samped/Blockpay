@@ -45,10 +45,13 @@ export async function POST(request: NextRequest) {
       size: processed.length,
     })
     
-    return new NextResponse(processed, {
+    // Convert to Buffer and add type assertion for NextResponse compatibility
+    const responseBuffer: Buffer = Buffer.isBuffer(processed) ? processed : Buffer.from(processed as ArrayBufferLike)
+    
+    return new NextResponse(responseBuffer as BodyInit, {
       headers: {
         'Content-Type': 'image/webp',
-        'Content-Length': processed.length.toString(),
+        'Content-Length': responseBuffer.length.toString(),
       },
     })
   } catch (err: any) {
