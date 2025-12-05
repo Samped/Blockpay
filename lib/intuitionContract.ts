@@ -138,6 +138,14 @@ export const INTUITION_CONTRACT_ABI = [
 ] as const
 
 /**
+ * Contract configuration for use with viem clients
+ */
+export const intuitionContractConfig = {
+  address: INTUITION_CONTRACT_ADDRESS,
+  abi: INTUITION_CONTRACT_ABI,
+} as const
+
+/**
  * Convert atom data to a JSON string for on-chain storage
  */
 export function serializeAtomData(data: Record<string, any>): string {

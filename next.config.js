@@ -16,6 +16,20 @@ const nextConfig = {
         ...config.resolve.fallback,
       }
     }
+    
+    // Ignore React Native modules that MetaMask SDK tries to import
+    // These are not needed for web builds
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@react-native-async-storage/async-storage': false,
+    }
+    
+    // Ignore optional React Native dependencies
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      '@react-native-async-storage/async-storage': false,
+    }
+    
     return config
   },
 }
