@@ -493,6 +493,13 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
       // Load ALL submissions from contract (contract supports multiple submissions)
       const allSubmissions: Submission[] = []
       
+      if (!publicClient) {
+        console.warn('Public client not available, skipping submission loading')
+        setSubmissions(allSubmissions)
+        setLoading(false)
+        return
+      }
+      
       try {
         // Get all submissions from contract
         const submissionsData = await publicClient.readContract({
