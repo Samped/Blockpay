@@ -9,7 +9,7 @@ interface ImageOptions {
 }
 
 export async function compressAndWatermark(
-  buffer: Buffer,
+  buffer: Buffer | Buffer<ArrayBufferLike>,
   opts: ImageOptions = {}
 ): Promise<Buffer> {
   const {
