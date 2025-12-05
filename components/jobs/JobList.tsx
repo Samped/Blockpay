@@ -18,6 +18,7 @@ export function JobList({ onCreateJob, refreshRef }: JobListProps) {
   const [refreshKey, setRefreshKey] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all')
+  const [failedJobIds, setFailedJobIds] = useState<bigint[]>([])
 
   // Refresh when jobCount changes or manually triggered
   useEffect(() => {
@@ -40,15 +41,41 @@ export function JobList({ onCreateJob, refreshRef }: JobListProps) {
       
       const jobPromises: Array<Promise<{ jobId: bigint; job: Job | null }>> = []
       
-      // Load all jobs from 1 to jobCount
+      // Helper function to retry getting a job with exponential backoff
+      const getJobWithRetry = async (jobId: bigint, maxRetries = 3): Promise<Job | null> => {
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          try {
+            const job = await getJob(jobId)
+            if (job) {
+              return job
+            }
+            // If job is null, wait before retrying (exponential backoff)
+            if (attempt < maxRetries - 1) {
+              const delay = Math.min(1000 * Math.pow(2, attempt), 5000) // Max 5 seconds
+              console.log(`Job ${jobId.toString()} not found, retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`)
+              await new Promise(resolve => setTimeout(resolve, delay))
+            }
+          } catch (err) {
+            console.error(`Error fetching job ${jobId.toString()} (attempt ${attempt + 1}):`, err)
+            if (attempt < maxRetries - 1) {
+              const delay = Math.min(1000 * Math.pow(2, attempt), 5000)
+              await new Promise(resolve => setTimeout(resolve, delay))
+            }
+          }
+        }
+        return null
+      }
+      
+      // Load all jobs from 1 to jobCount with retry logic
       for (let i = 1n; i <= jobCount; i++) {
         jobPromises.push(
-          getJob(i).then(job => {
-            console.log(`Job ${i.toString()} result:`, job ? 'found' : 'not found')
+          getJobWithRetry(i).then(job => {
+            if (job) {
+              console.log(`✅ Job ${i.toString()} loaded successfully`)
+            } else {
+              console.warn(`⚠️ Job ${i.toString()} could not be loaded after retries`)
+            }
             return { jobId: i, job }
-          }).catch(err => {
-            console.error(`Error fetching job ${i.toString()}:`, err)
-            return { jobId: i, job: null }
           })
         )
       }
@@ -67,9 +94,19 @@ export function JobList({ onCreateJob, refreshRef }: JobListProps) {
           return jobWithId
         })
       
-      console.log(`Found ${validJobs.length} valid jobs`)
+      const failedJobs = jobResults.filter(({ job }) => job === null)
+      if (failedJobs.length > 0) {
+        const failedIds = failedJobs.map(({ jobId }) => jobId)
+        setFailedJobIds(failedIds)
+        console.warn(`⚠️ ${failedJobs.length} job(s) could not be loaded:`, failedIds.map(id => id.toString()))
+        console.warn('   This might be due to indexing delays. Try refreshing in a few moments.')
+      } else {
+        setFailedJobIds([])
+      }
+      
+      console.log(`✅ Found ${validJobs.length} valid jobs out of ${jobCount.toString()} total`)
       validJobs.forEach(job => {
-        console.log(`  Job ${job.jobId.toString()}: title="${(job as any).title || 'NOT SET'}"`)
+        console.log(`  Job ${job.jobId.toString()}: title="${(job as any).title || 'NOT SET'}", creator="${job.creator.substring(0, 10)}..."`)
       })
       
       // Sort by job ID descending (newest first)
@@ -184,7 +221,7 @@ export function JobList({ onCreateJob, refreshRef }: JobListProps) {
           </svg>
           <input
             type="text"
-            placeholder="Search by creator address..."
+            placeholder="Search by job ID or creator address..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
