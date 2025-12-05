@@ -13,7 +13,7 @@ import {
 export interface Atom {
   id?: string
   term_id?: string
-  type: string
+  type?: string
   data?: Record<string, any>
   label?: string
   created_at?: string
