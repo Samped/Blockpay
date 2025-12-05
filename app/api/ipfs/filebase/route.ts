@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
 
     // Convert Web File to Node.js Buffer
     const arrayBuffer = await file.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
+    const buffer = Buffer.from(arrayBuffer) as Buffer
 
     // 1) Virus scan (if enabled)
     const virusScanEnabled = process.env.ENABLE_VIRUS_SCAN !== 'false'
