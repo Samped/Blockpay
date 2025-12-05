@@ -30,6 +30,19 @@ export interface TrustScore {
   votes: number
 }
 
+// Predicate labels we consider for profile fields (triple-based)
+const PROFILE_PREDICATE_MAP: Record<string, keyof any> = {
+  HasName: 'name',
+  HasBio: 'bio',
+  HasEmail: 'email',
+  HasWebsite: 'website',
+  HasAvatar: 'profilePicture',
+  HasTwitter: 'twitter',
+  HasGithub: 'github',
+  HasBehance: 'behance',
+  HasDribbble: 'dribbble',
+}
+
 export class IntuitionClient {
   private apiUrl: string
   private graphUrl: string
@@ -41,6 +54,102 @@ export class IntuitionClient {
     this.graphUrl = graphUrl || process.env.NEXT_PUBLIC_INTUITION_GRAPH_URL || 'https://testnet.intuition.sh'
     this.graphqlUrl = graphqlUrl || process.env.NEXT_PUBLIC_INTUITION_GRAPHQL_URL || 'https://testnet.intuition.sh/v1/graphql'
     this.contractAddress = process.env.NEXT_PUBLIC_INTUITION_CONTRACT || '0x2Ece8D4dEdcB9918A398528f3fa4688b1d2CAB91'
+  }
+
+  /**
+   * Fetch profile fields using triples (preferred over JSON-in-atom)
+   * - Triples: subject = userAtomId, predicate in PROFILE_PREDICATE_MAP keys
+   * - Resolve object atoms to get their data/value
+   */
+  private async fetchProfileTriples(userAtomId: string): Promise<Record<string, any>> {
+    try {
+      const predicates = Object.keys(PROFILE_PREDICATE_MAP)
+
+      const triplesQuery = `
+        query GetProfileTriples($userId: String!, $predicates: [String!]) {
+          triples(
+            where: {
+              _and: [
+                { subject: { _eq: $userId } }
+                { predicate: { _in: $predicates } }
+              ]
+            }
+            limit: 100
+          ) {
+            id
+            subject
+            predicate
+            object
+          }
+        }
+      `
+
+      const tripleData = await this.graphqlQuery(triplesQuery, {
+        userId: userAtomId,
+        predicates,
+      })
+
+      const triples = (tripleData?.triples || []) as Triple[]
+
+      if (!triples.length) {
+        return {}
+      }
+
+      // Collect unique object IDs (atoms) to resolve their values
+      const objectIds = Array.from(new Set(triples.map(t => t.object))).filter(Boolean)
+      const profileData: Record<string, any> = {}
+
+      if (!objectIds.length) {
+        return {}
+      }
+
+      const atomsQuery = `
+        query GetProfileAtoms($ids: [String!]) {
+          atoms(where: { term_id: { _in: $ids } }, limit: 200) {
+            term_id
+            id
+            type
+            label
+            data
+          }
+        }
+      `
+
+      const atomsRes = await this.graphqlQuery(atomsQuery, { ids: objectIds })
+      const atoms = atomsRes?.atoms || []
+
+      const resolveValue = (atomId: string) => {
+        const atom = atoms.find((a: any) => a.term_id === atomId || a.id === atomId)
+        if (!atom) return null
+        if (!atom.data) return null
+
+        let parsed: any = atom.data
+        if (typeof atom.data === 'string') {
+          try {
+            parsed = JSON.parse(atom.data)
+          } catch {
+            parsed = { value: atom.data }
+          }
+        }
+
+        // Prefer explicit value field, otherwise try common keys
+        return parsed.value || parsed.name || parsed.label || parsed.address || parsed.wallet || null
+      }
+
+      for (const triple of triples) {
+        const fieldKey = PROFILE_PREDICATE_MAP[triple.predicate]
+        if (!fieldKey) continue
+        const value = resolveValue(triple.object)
+        if (value) {
+          profileData[fieldKey] = value
+        }
+      }
+
+      return profileData
+    } catch (error) {
+      console.error('[ERROR] fetchProfileTriples failed:', error)
+      return {}
+    }
   }
 
   /**
@@ -1273,22 +1382,10 @@ export class IntuitionClient {
         data_type: typeof userAtom.data
       })
 
-      // Ensure data is properly parsed
-      let profileData: Record<string, any> = {}
-      if (userAtom.data) {
-        if (typeof userAtom.data === 'string') {
-          try {
-            profileData = JSON.parse(userAtom.data)
-            console.log('[OK] Parsed atom data from string')
-          } catch (e) {
-            console.warn('Could not parse atom data as JSON:', e)
-            profileData = {}
-          }
-        } else if (typeof userAtom.data === 'object') {
-          profileData = userAtom.data
-          console.log('[OK] Using atom data as object')
-        }
-      }
+      const atomIdentifier = (userAtom as any).term_id || userAtom.id
+
+      // Use triple-based profile data only (no legacy JSON fallback)
+      const profileData: Record<string, any> = await this.fetchProfileTriples(atomIdentifier)
       
       console.log('[STATS] Profile data extracted:', {
         keys: Object.keys(profileData),
@@ -1358,22 +1455,26 @@ export class IntuitionClient {
 export const intuitionClient = new IntuitionClient()
 
 /**
- * Create a profile atom on-chain using depositAtom
- * This function handles the on-chain transaction to create an atom with a deposit
+ * Create a universal User atom on-chain with minimal data
+ * Uses the new triple-based pattern: User atom contains only type, wallet, and displayName
+ * Profile fields are stored as triples, not in the atom data
  * 
  * @param signer - Wallet client from wagmi (useWalletClient)
- * @param profileData - User profile data to store in the atom
- * @param depositAmount - Amount of ETH/tTRUST to deposit (default: 0.001)
+ * @param userWallet - User's wallet address (canonical identifier)
+ * @param displayName - Optional human-readable display name
+ * @param depositAmount - Amount of ETH/tTRUST to deposit (default: 0.01)
  * @returns Transaction hash and success status
  */
 export async function createProfileAtom({
   signer,
-  profileData,
-  depositAmount = '0.001'
+  userWallet,
+  displayName,
+  depositAmount = '0.01'
 }: {
   signer: any      // Wallet client or injected signer
-  profileData: any  // User profile data JSON
-  depositAmount?: string // Deposit amount in ETH/tTRUST (default: 0.001)
+  userWallet: string  // User's wallet address
+  displayName?: string // Optional display name
+  depositAmount?: string // Deposit amount in ETH/tTRUST (default: 0.01)
 }) {
   try {
     if (!signer) {
@@ -1387,37 +1488,42 @@ export async function createProfileAtom({
       throw new Error('No account found in wallet client')
     }
 
-    // 1. Convert JSON to bytes for createAtoms function
-    const { atomDataToBytes } = await import('./intuitionContract')
-    const atomDataBytes = atomDataToBytes(profileData)
+    // Import encoding functions
+    const { encodeUserAtomData } = await import('./intuitionContract')
+    
+    // Encode minimal User atom data: "User", wallet, displayName
+    const userDataBytes = encodeUserAtomData(userWallet.toLowerCase(), displayName)
     const depositAmountWei = parseEther(depositAmount)
 
-    console.log('=== Creating profile atom on-chain ===')
+    console.log('=== Creating universal User atom on-chain ===')
     console.log('Contract:', INTUITION_CONTRACT_ADDRESS)
     console.log('Function: createAtoms(bytes[] data, uint256[] assets) payable')
-    console.log('Atom data (bytes):', atomDataBytes.substring(0, 100) + '...')
+    console.log('User wallet:', userWallet)
+    console.log('Display name:', displayName || '(none)')
+    console.log('Atom data (bytes):', userDataBytes.substring(0, 100) + '...')
     console.log('Deposit amount:', depositAmount, 'tTRUST')
     console.log('Deposit amount (wei):', depositAmountWei.toString())
 
-    // 2. Call createAtoms with bytes array and assets array
+    // Call createAtoms with minimal User atom data
     // msg.value must equal sum(assets[])
     const txHash = await walletClient.writeContract({
       address: INTUITION_CONTRACT_ADDRESS,
       abi: INTUITION_CONTRACT_ABI,
       functionName: 'createAtoms',
       args: [
-        [atomDataBytes], // bytes[] - array with one atom data
+        [userDataBytes], // bytes[] - array with one User atom data
         [depositAmountWei] // uint256[] - array with one deposit amount
       ],
       value: depositAmountWei, // msg.value must equal sum(assets[])
       account: account
     })
 
-    console.log('[SUCCESS] Transaction sent:', txHash)
+    console.log('[SUCCESS] User atom creation transaction sent:', txHash)
+    console.log('[INFO] After transaction confirms, create triples for profile fields')
 
     return { success: true, txHash }
   } catch (error: any) {
-    console.error('[ERROR] Error creating profile atom:', error)
+    console.error('[ERROR] Error creating User atom:', error)
     return { 
       success: false, 
       error: error.message || 'Unknown error',

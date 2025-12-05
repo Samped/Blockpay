@@ -120,6 +120,21 @@ export const INTUITION_CONTRACT_ABI = [
       { name: '', type: 'uint256', internalType: 'uint256' },
     ],
   },
+  // Create triples function
+  {
+    name: 'createTriples',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'subjectIds', type: 'bytes32[]', internalType: 'bytes32[]' },
+      { name: 'predicateIds', type: 'bytes32[]', internalType: 'bytes32[]' },
+      { name: 'objectIds', type: 'bytes32[]', internalType: 'bytes32[]' },
+      { name: 'assets', type: 'uint256[]', internalType: 'uint256[]' },
+    ],
+    outputs: [
+      { name: '', type: 'bytes32[]', internalType: 'bytes32[]' },
+    ],
+  },
 ] as const
 
 /**
@@ -150,5 +165,62 @@ export function atomDataToBytes(data: Record<string, any>): `0x${string}` {
   // Use viem's toBytes to convert string to bytes, then to hex
   const bytes = toBytes(jsonString)
   return bytesToHex(bytes)
+}
+
+/**
+ * Encode minimal User atom data according to universal pattern:
+ * bytes userData = abi.encode("User", userWallet, displayName)
+ * 
+ * @param userWallet - The user's wallet address (canonical identifier)
+ * @param displayName - Optional human-readable display name
+ * @returns Encoded bytes for the User atom
+ */
+export function encodeUserAtomData(userWallet: string, displayName?: string): `0x${string}` {
+  // Encode: "User", userWallet, displayName (or empty string)
+  const type = 'User'
+  const wallet = userWallet.toLowerCase()
+  const name = displayName || ''
+  
+  // Use abi.encode equivalent: encodePacked for simple concatenation
+  // In Solidity: abi.encode("User", userWallet, displayName)
+  // In JS: we'll encode as a structured format that can be decoded
+  const data = {
+    type,
+    wallet,
+    name
+  }
+  
+  // Convert to bytes using the same method as before
+  return atomDataToBytes(data)
+}
+
+/**
+ * Encode predicate atom data
+ * Predicates are universal concepts like "HasName", "HasBio", etc.
+ * 
+ * @param predicateName - The name of the predicate (e.g., "HasName", "HasBio")
+ * @returns Encoded bytes for the predicate atom
+ */
+export function encodePredicateAtomData(predicateName: string): `0x${string}` {
+  const data = {
+    type: 'Predicate',
+    name: predicateName
+  }
+  return atomDataToBytes(data)
+}
+
+/**
+ * Encode value atom data for triple objects
+ * Values are the actual data points (e.g., "Samuel", "Developer", etc.)
+ * 
+ * @param value - The value to store
+ * @returns Encoded bytes for the value atom
+ */
+export function encodeValueAtomData(value: string): `0x${string}` {
+  const data = {
+    type: 'Value',
+    value
+  }
+  return atomDataToBytes(data)
 }
 
