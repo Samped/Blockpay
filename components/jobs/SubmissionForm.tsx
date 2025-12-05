@@ -38,22 +38,11 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
   useEffect(() => {
     if (isConfirmed && hash && step === 'creating' && submissionMetadata) {
       // Transaction confirmed! Store submission metadata in localStorage
-      const storageKey = `submission_metadata_${jobId.toString()}_${address}`
-      localStorage.setItem(storageKey, JSON.stringify({
-        jobId: jobId.toString(),
-        worker: address,
-        previewCID: submissionMetadata.previewCID,
-        fullResCID: submissionMetadata.fullResCID,
-        metadataCID: submissionMetadata.metadataCID,
-        metadata: submissionMetadata.metadata,
-        transactionHash: hash,
-        createdAt: new Date().toISOString(),
-      }))
-      console.log('Stored submission metadata in localStorage:', storageKey)
+      // Use transaction hash to make each submission unique (prevents overwriting)
+      const timestamp = Date.now()
+      const uniqueKey = `submission_metadata_${jobId.toString()}_${address}_${hash}_${timestamp}`
       
-      // Also store with jobId as key for easier lookup
-      const jobKey = `submission_metadata_job_${jobId.toString()}`
-      localStorage.setItem(jobKey, JSON.stringify({
+      const submissionData = {
         jobId: jobId.toString(),
         worker: address,
         previewCID: submissionMetadata.previewCID,
@@ -62,7 +51,37 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
         metadata: submissionMetadata.metadata,
         transactionHash: hash,
         createdAt: new Date().toISOString(),
-      }))
+      }
+      
+      // Store with unique key
+      localStorage.setItem(uniqueKey, JSON.stringify(submissionData))
+      console.log('Stored submission metadata in localStorage:', uniqueKey)
+      
+      // Also store with worker-based key (for backward compatibility, but append to array)
+      const workerKey = `submission_metadata_${jobId.toString()}_${address}`
+      const existingSubmissions = JSON.parse(localStorage.getItem(workerKey) || '[]')
+      if (!Array.isArray(existingSubmissions)) {
+        // Convert old single submission to array format
+        const oldData = existingSubmissions
+        localStorage.setItem(workerKey, JSON.stringify([oldData, submissionData]))
+      } else {
+        existingSubmissions.push(submissionData)
+        localStorage.setItem(workerKey, JSON.stringify(existingSubmissions))
+      }
+      console.log('Updated worker-based submission list:', workerKey)
+      
+      // Also store with jobId as key (append to array to support multiple submissions)
+      const jobKey = `submission_metadata_job_${jobId.toString()}`
+      const existingJobSubmissions = JSON.parse(localStorage.getItem(jobKey) || '[]')
+      if (!Array.isArray(existingJobSubmissions)) {
+        // Convert old single submission to array format
+        const oldData = existingJobSubmissions
+        localStorage.setItem(jobKey, JSON.stringify([oldData, submissionData]))
+      } else {
+        existingJobSubmissions.push(submissionData)
+        localStorage.setItem(jobKey, JSON.stringify(existingJobSubmissions))
+      }
+      console.log('Updated job-based submission list:', jobKey)
       
       // Show success
       setStep('success')
