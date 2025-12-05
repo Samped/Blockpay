@@ -69,7 +69,7 @@ export function WorkerNotifications() {
         
         if (result.errors) {
           console.error('❌ GraphQL errors:', result.errors)
-          return
+          return false
         }
         
         const allAtoms = result.data?.atoms || []
