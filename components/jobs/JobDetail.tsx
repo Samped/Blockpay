@@ -232,18 +232,12 @@ function SubmissionPreviewImage({ previewCID }: { previewCID: string }) {
     return false
   }
 
-  // Prevent image selection
-  const handleSelectStart = (e: React.SyntheticEvent) => {
-    e.preventDefault()
-    return false
-  }
-
   return (
     <div 
       className="relative bg-white rounded-xl border-2 border-gray-200 shadow-lg overflow-hidden"
       onContextMenu={handleContextMenu}
       onDragStart={handleDragStart}
-      onSelectStart={handleSelectStart}
+      onSelect={(e) => e.preventDefault()}
       style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
     >
       {!imageLoaded && !error && (
