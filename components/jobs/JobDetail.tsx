@@ -474,175 +474,208 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
   async function loadJobData() {
     try {
       setLoading(true)
-      const jobData = await getJob(jobId)
+      setError(null) // Clear previous errors
+      
+      // Try loading the job, with retry if it fails
+      let jobData = await getJob(jobId)
+      
+      // If job not found, wait a bit and retry (might be still indexing)
       if (!jobData) {
-        setError('Job not found')
+        console.log(`[INFO] Job ${jobId.toString()} not found, retrying after 2 seconds...`)
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        jobData = await getJob(jobId)
+      }
+      
+      // If still not found, wait longer and retry once more
+      if (!jobData) {
+        console.log(`[INFO] Job ${jobId.toString()} still not found, retrying after 3 more seconds...`)
+        await new Promise(resolve => setTimeout(resolve, 3000))
+        jobData = await getJob(jobId)
+      }
+      
+      if (!jobData) {
+        setError(`Job #${jobId.toString()} not found. It may still be processing. Please refresh the page.`)
+        console.error(`[ERROR] Job ${jobId.toString()} could not be loaded after retries`)
         return
       }
 
       setJob(jobData)
 
-      // The contract only stores one submission (hasSubmission, worker, submissionHash)
-      // If there's a submission, fetch the preview CID and fullRes CID from localStorage or IPFS
-      if (jobData.hasSubmission && jobData.worker && jobData.submissionHash !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-        let previewCID = ''
-        let fullResCID = ''
+      // Load ALL submissions from contract (contract supports multiple submissions)
+      const allSubmissions: Submission[] = []
+      
+      try {
+        // Get all submissions from contract
+        const submissionsData = await publicClient.readContract({
+          address: JOB_POOL_ADDRESS as `0x${string}`,
+          abi: JOB_POOL_ABI,
+          functionName: 'getSubmissions',
+          args: [jobId],
+        }) as [string[], `0x${string}`[], boolean[]]
         
-        // Try to get submission metadata from localStorage first
-        try {
-          // Try jobId-based key first
-          const jobKey = `submission_metadata_job_${jobId.toString()}`
-          const stored = localStorage.getItem(jobKey)
-          if (stored) {
-            const submissionData = JSON.parse(stored)
-            if (submissionData.previewCID) {
-              previewCID = submissionData.previewCID
-              console.log('Found submission preview CID in localStorage:', previewCID)
-            }
-            if (submissionData.fullResCID) {
-              fullResCID = submissionData.fullResCID
-              console.log('Found submission fullRes CID in localStorage:', fullResCID)
-            }
+        const [workers, submissionHashes, accepted] = submissionsData
+        console.log(`[INFO] Found ${workers.length} submissions for job ${jobId.toString()}`)
+        
+        // Load submission metadata from localStorage for each submission
+        for (let i = 0; i < workers.length; i++) {
+          const worker = workers[i]
+          const submissionHash = submissionHashes[i]
+          const isAccepted = accepted[i]
+          
+          if (!worker || worker === '0x0000000000000000000000000000000000000000') {
+            continue
           }
           
-          // If not found, try worker-based key
-          if (!previewCID || !fullResCID) {
-            const workerKey = `submission_metadata_${jobId.toString()}_${jobData.worker.toLowerCase()}`
+          let previewCID = ''
+          let fullResCID = ''
+          
+          // Try to get submission metadata from localStorage
+          try {
+            // Try worker-based key (may be array or single object)
+            const workerKey = `submission_metadata_${jobId.toString()}_${worker.toLowerCase()}`
             const stored = localStorage.getItem(workerKey)
             if (stored) {
               const submissionData = JSON.parse(stored)
-              if (submissionData.previewCID && !previewCID) {
-                previewCID = submissionData.previewCID
-                console.log('Found submission preview CID in localStorage (worker key):', previewCID)
-              }
-              if (submissionData.fullResCID && !fullResCID) {
-                fullResCID = submissionData.fullResCID
-                console.log('Found submission fullRes CID in localStorage (worker key):', fullResCID)
-              }
-            }
-          }
-          
-          // If still not found, try searching all submission metadata keys
-          if (!previewCID || !fullResCID) {
-            for (let i = 0; i < localStorage.length; i++) {
-              const key = localStorage.key(i)
-              if (key && key.startsWith('submission_metadata_')) {
-                try {
-                  const stored = JSON.parse(localStorage.getItem(key) || '{}')
-                  if (stored.jobId === jobId.toString() && stored.worker?.toLowerCase() === jobData.worker.toLowerCase()) {
-                    if (stored.previewCID && !previewCID) {
-                      previewCID = stored.previewCID
-                      console.log('Found submission preview CID in localStorage (search):', previewCID)
+              // Handle both array and single object formats
+              const submissions = Array.isArray(submissionData) ? submissionData : [submissionData]
+              
+              // Find submission matching this hash or the most recent one
+              for (const sub of submissions) {
+                if (sub.jobId === jobId.toString() && sub.worker?.toLowerCase() === worker.toLowerCase()) {
+                  // Match by submission hash if available, or use the most recent
+                  if (!submissionHash || sub.transactionHash || !previewCID) {
+                    if (sub.previewCID) previewCID = sub.previewCID
+                    if (sub.fullResCID) fullResCID = sub.fullResCID
+                    // If we found a match, prefer it
+                    if (sub.transactionHash && submissionHash) {
+                      break
                     }
-                    if (stored.fullResCID && !fullResCID) {
-                      fullResCID = stored.fullResCID
-                      console.log('Found submission fullRes CID in localStorage (search):', fullResCID)
-                    }
-                    if (previewCID && fullResCID) break
                   }
-                } catch (e) {
-                  // Skip invalid entries
                 }
               }
             }
-          }
-        } catch (err) {
-          console.warn('Error reading submission metadata from localStorage:', err)
-        }
-        
-        // If still not found, try fetching from IPFS using Filebase API
-        if (!previewCID || !fullResCID) {
-          try {
-            console.log('[INFO] Searching Filebase API for submission metadata with jobId:', jobId.toString())
-            // Try to fetch submission metadata from Filebase by searching for jobId
-            const response = await fetch(`/api/ipfs/filebase/fetch?jobId=${jobId.toString()}`)
-            console.log('Filebase API response status:', response.status)
             
-            if (response.ok) {
-              const data = await response.json()
-              console.log('Filebase API response data:', data)
-              
-              // Handle both single object and array responses
-              let submissionMeta = null
-              if (data.success) {
-                if (Array.isArray(data.metadata)) {
-                  // Find metadata that matches this job and has previewCID
-                  submissionMeta = data.metadata.find((m: any) => 
-                    (m.jobId === jobId.toString() || m.jobId === jobId) && 
-                    m.previewCID
-                  )
-                } else if (data.metadata && data.metadata.previewCID) {
-                  // Single object response
-                  submissionMeta = data.metadata
-                }
-              }
-              
-              if (submissionMeta) {
-                if (submissionMeta.previewCID && !previewCID) {
-                  previewCID = submissionMeta.previewCID
-                  console.log('[SUCCESS] Found submission preview CID from Filebase API:', previewCID)
-                }
-                // Check both submissionMeta.fullResCID and submissionMeta.metadata?.fullResCID
-                const foundFullResCID = submissionMeta.fullResCID || submissionMeta.metadata?.fullResCID
-                if (foundFullResCID && !fullResCID) {
-                  fullResCID = foundFullResCID
-                  console.log('[SUCCESS] Found submission fullRes CID from Filebase API:', fullResCID)
-                }
+            // Also try job-based key (may be array)
+            if (!previewCID || !fullResCID) {
+              const jobKey = `submission_metadata_job_${jobId.toString()}`
+              const stored = localStorage.getItem(jobKey)
+              if (stored) {
+                const submissionData = JSON.parse(stored)
+                const submissions = Array.isArray(submissionData) ? submissionData : [submissionData]
                 
-                // Store it in localStorage for future use
-                const storageKey = `submission_metadata_job_${jobId.toString()}`
-                localStorage.setItem(storageKey, JSON.stringify({
-                  jobId: jobId.toString(),
-                  worker: jobData.worker,
-                  previewCID: previewCID,
-                  fullResCID: fullResCID,
-                  metadata: submissionMeta,
-                  createdAt: new Date().toISOString(),
-                }))
-                console.log('💾 Stored submission metadata in localStorage with key:', storageKey)
-              } else {
-                console.warn('[WARNING] Filebase API returned data but no matching submission metadata found')
+                for (const sub of submissions) {
+                  if (sub.worker?.toLowerCase() === worker.toLowerCase()) {
+                    if (sub.previewCID && !previewCID) previewCID = sub.previewCID
+                    if (sub.fullResCID && !fullResCID) fullResCID = sub.fullResCID
+                  }
+                }
               }
-            } else {
-              const errorText = await response.text()
-              console.warn('Filebase API error response:', response.status, errorText)
+            }
+            
+            // Search all submission metadata keys
+            if (!previewCID || !fullResCID) {
+              for (let j = 0; j < localStorage.length; j++) {
+                const key = localStorage.key(j)
+                if (key && key.startsWith('submission_metadata_')) {
+                  try {
+                    const stored = JSON.parse(localStorage.getItem(key) || '{}')
+                    const submissions = Array.isArray(stored) ? stored : [stored]
+                    
+                    for (const sub of submissions) {
+                      if (sub.jobId === jobId.toString() && sub.worker?.toLowerCase() === worker.toLowerCase()) {
+                        if (sub.previewCID && !previewCID) previewCID = sub.previewCID
+                        if (sub.fullResCID && !fullResCID) fullResCID = sub.fullResCID
+                      }
+                    }
+                  } catch (e) {
+                    // Skip invalid entries
+                  }
+                }
+              }
             }
           } catch (err) {
-            console.error('[ERROR] Error fetching submission metadata from Filebase:', err)
+            console.warn(`Error reading submission metadata for worker ${worker}:`, err)
+          }
+          
+          // Create submission object
+          const submission: Submission = {
+            id: BigInt(i),
+            submitter: worker as `0x${string}`,
+            previewCID: previewCID,
+            status: isAccepted ? SubmissionStatus.Approved : SubmissionStatus.Pending,
+            timestamp: BigInt(Math.floor(Date.now() / 1000)), // Contract doesn't expose timestamp easily
+          }
+          
+          allSubmissions.push(submission)
+          console.log(`[OK] Loaded submission ${i} from worker ${worker.substring(0, 10)}... (previewCID: ${previewCID ? 'found' : 'missing'})`)
+        }
+      } catch (err) {
+        console.warn('Error loading submissions from contract:', err)
+        // Fallback to old method if getSubmissions fails
+        if (jobData.hasSubmission && jobData.worker && jobData.submissionHash !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+          let previewCID = ''
+          let fullResCID = ''
+          
+          // Try to get submission metadata from localStorage first
+          try {
+            // Try jobId-based key first (may be array)
+            const jobKey = `submission_metadata_job_${jobId.toString()}`
+            const stored = localStorage.getItem(jobKey)
+            if (stored) {
+              const submissionData = JSON.parse(stored)
+              const submissions = Array.isArray(submissionData) ? submissionData : [submissionData]
+              const latest = submissions[submissions.length - 1] // Get most recent
+              if (latest.previewCID) previewCID = latest.previewCID
+              if (latest.fullResCID) fullResCID = latest.fullResCID
+            }
+            
+            // Try worker-based key (may be array)
+            if (!previewCID || !fullResCID) {
+              const workerKey = `submission_metadata_${jobId.toString()}_${jobData.worker.toLowerCase()}`
+              const stored = localStorage.getItem(workerKey)
+              if (stored) {
+                const submissionData = JSON.parse(stored)
+                const submissions = Array.isArray(submissionData) ? submissionData : [submissionData]
+                const latest = submissions[submissions.length - 1] // Get most recent
+                if (latest.previewCID && !previewCID) previewCID = latest.previewCID
+                if (latest.fullResCID && !fullResCID) fullResCID = latest.fullResCID
+              }
+            }
+          } catch (err2) {
+            console.warn('Error reading submission metadata from localStorage:', err2)
+          }
+          
+          const submission: Submission = {
+            id: 0n,
+            submitter: jobData.worker,
+            previewCID: previewCID,
+            status: jobData.status === JobStatus.Completed ? SubmissionStatus.Approved : SubmissionStatus.Pending,
+            timestamp: BigInt(Math.floor(Date.now() / 1000)),
+          }
+          allSubmissions.push(submission)
+        }
+      }
+        
+      console.log(`[SUCCESS] Loaded ${allSubmissions.length} submissions for job ${jobId.toString()}`)
+      setSubmissions(allSubmissions)
+      
+      // Store fullResCID from the first submission (for backward compatibility)
+      if (allSubmissions.length > 0 && allSubmissions[0].previewCID) {
+        // Try to get fullResCID from localStorage
+        const workerKey = `submission_metadata_${jobId.toString()}_${allSubmissions[0].submitter.toLowerCase()}`
+        const stored = localStorage.getItem(workerKey)
+        if (stored) {
+          try {
+            const submissionData = JSON.parse(stored)
+            const submissions = Array.isArray(submissionData) ? submissionData : [submissionData]
+            const latest = submissions[submissions.length - 1]
+            if (latest.fullResCID) {
+              setFullResCID(latest.fullResCID)
+            }
+          } catch (e) {
+            // Ignore parse errors
           }
         }
-        
-        console.log('Submission data:', {
-          jobId: jobId.toString(),
-          worker: jobData.worker,
-          hasSubmission: jobData.hasSubmission,
-          submissionHash: jobData.submissionHash,
-          previewCID: previewCID || 'NOT FOUND',
-          fullResCID: fullResCID || 'NOT FOUND',
-        })
-        
-        const submission: Submission = {
-          id: 1n, // Only one submission per job in this contract
-          submitter: jobData.worker,
-          previewCID: previewCID, // Now we have the actual preview CID
-          status: jobData.status === JobStatus.Completed ? SubmissionStatus.Approved : SubmissionStatus.Pending,
-          timestamp: BigInt(Math.floor(Date.now() / 1000)),
-        }
-        setSubmissions([submission])
-        
-        // Store fullResCID in a separate state for use when job is completed
-        if (fullResCID) {
-          setFullResCID(fullResCID)
-        }
-        
-        // If previewCID is still empty, log a warning
-        if (!previewCID) {
-          console.warn('[WARNING] Preview CID not found for submission. Worker:', jobData.worker, 'JobId:', jobId.toString())
-          console.warn('   This might mean the submission metadata was not stored or the Filebase search failed.')
-          console.warn('   Check localStorage for keys starting with "submission_metadata_"')
-        }
-      } else {
-        setSubmissions([])
       }
     } catch (err: any) {
       console.error('Error loading job:', err)
