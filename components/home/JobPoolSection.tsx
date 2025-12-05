@@ -390,6 +390,7 @@ export function JobPoolSection() {
                             <span className="font-medium">
                               {(() => {
                                 const expDate = job.expirationDate || job.deadline
+                                if (!expDate) return 'N/A'
                                 const date = new Date(expDate)
                                 const now = new Date()
                                 const daysLeft = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
