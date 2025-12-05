@@ -149,6 +149,11 @@ export function JobPoolSection() {
         const jobsWithData = await Promise.all(
           activeJobs.map(async (job) => {
             try {
+              // Skip if job.id is missing
+              if (!job.id) {
+                return job
+              }
+              
               // Get client info
               const clientTriples = await intuitionClient.getTriples(job.id, 'posted_by')
               const clientAtomId = clientTriples[0]?.object
