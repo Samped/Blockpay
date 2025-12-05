@@ -316,7 +316,11 @@ export function JobCreateForm({ onSuccess, onCancel }: JobCreateFormProps) {
             <div className="mb-6 p-3 bg-gray-50 rounded-lg">
               <p className="text-xs text-gray-500 mb-1">Transaction Hash:</p>
               <p className="text-sm text-gray-700 font-mono break-all">
-                {(txHash || hash)?.substring(0, 20)}...{(txHash || hash)?.substring((txHash || hash)?.length - 8)}
+                {(() => {
+                  const hashValue = txHash || hash
+                  if (!hashValue) return 'N/A'
+                  return `${hashValue.substring(0, 20)}...${hashValue.substring(hashValue.length - 8)}`
+                })()}
               </p>
             </div>
           )}
