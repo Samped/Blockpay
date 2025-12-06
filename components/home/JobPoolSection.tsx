@@ -300,7 +300,7 @@ export function JobPoolSection() {
               {displayJobs.map((job) => (
                 <Link
                   key={job.id}
-                  href={`/jobs/${job.id}`}
+                  href="/jobs"
                   className="group relative bg-white rounded-2xl border border-gray-100 shadow-soft hover:shadow-card-hover transition-all duration-300 hover:-translate-y-1 overflow-hidden"
                 >
                   <div className="p-6">
