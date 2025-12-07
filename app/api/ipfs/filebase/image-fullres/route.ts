@@ -47,8 +47,8 @@ export async function GET(request: NextRequest) {
 
     try {
       const cleanCid = cid.replace(/^ipfs:\/\//, '').replace(/^\/ipfs\//, '')
-      console.log(`[FullRes Image Proxy] 🔍 Fetching ORIGINAL (unwatermarked) image from Filebase with CID: ${cleanCid}`)
-      console.log(`[FullRes Image Proxy] ⚠️ This route NEVER processes or watermarks images - serving exactly as stored`)
+      console.log(`[FullRes Image Proxy] Fetching ORIGINAL (unwatermarked) image from Filebase with CID: ${cleanCid}`)
+      console.log(`[FullRes Image Proxy] This route NEVER processes or watermarks images - serving exactly as stored`)
       
       const command = new GetObjectCommand({
         Bucket: BUCKET,
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
       const body = await response.Body?.transformToByteArray()
       
       if (!body || body.length === 0) {
-        console.error(`[FullRes Image Proxy] ❌ Empty response from Filebase for CID: ${cleanCid}`)
+        console.error(`[FullRes Image Proxy] Empty response from Filebase for CID: ${cleanCid}`)
         return NextResponse.json(
           { error: 'Empty response from Filebase', cid: cleanCid },
           { status: 404 }
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
       // Get content type from response
       const contentType = response.ContentType || 'image/webp'
       
-      console.log(`[FullRes Image Proxy] ✅ [SUCCESS] Serving ORIGINAL image (NO WATERMARK, NO PROCESSING):`)
+      console.log(`[FullRes Image Proxy] [SUCCESS] Serving ORIGINAL image (NO WATERMARK, NO PROCESSING):`)
       console.log(`[FullRes Image Proxy]    - Content-Type: ${contentType}`)
       console.log(`[FullRes Image Proxy]    - Size: ${body.length} bytes`)
       console.log(`[FullRes Image Proxy]    - CID: ${cleanCid}`)
