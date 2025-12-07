@@ -687,13 +687,13 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
     
     // Prevent duplicate processing
     if (processedHashRef.current === hash) {
-      console.log('⚠️ Transaction hash already processed:', hash)
+      console.log('Transaction hash already processed:', hash)
       return
     }
 
     const handleTransactionConfirmed = async () => {
       try {
-        console.log('✅ Transaction confirmed, creating notification for worker...', hash)
+        console.log('Transaction confirmed, creating notification for worker...', hash)
         
         // Mark this hash as processed
         processedHashRef.current = hash
@@ -770,7 +770,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
               description: job.description || '',
             }
             localStorage.setItem(completedJobKey, JSON.stringify(completedJobData))
-            console.log('💾 Stored completed job with full resolution image for creator:', completedJobKey)
+            console.log('Stored completed job with full resolution image for creator:', completedJobKey)
             
             // Also store in a list of all completed jobs for this creator
             const creatorCompletedJobsKey = `creator_completed_jobs_${address.toLowerCase()}`
@@ -782,7 +782,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
                 completedAt: completedJobData.completedAt,
               })
               localStorage.setItem(creatorCompletedJobsKey, JSON.stringify(existingJobs))
-              console.log('💾 Updated creator completed jobs list')
+              console.log('Updated creator completed jobs list')
             }
           } catch (err) {
             console.error('Error storing completed job data:', err)
@@ -815,7 +815,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
             // Keep only last 50 notifications
             const recentNotifications = existingNotifications.slice(0, 50)
             localStorage.setItem(workerNotificationsKey, JSON.stringify(recentNotifications))
-            console.log('🔔 Created notification for worker:', workerAddress, 'Job:', jobId.toString())
+            console.log('Created notification for worker:', workerAddress, 'Job:', jobId.toString())
             
             // Trigger storage event so other tabs/components can update
             window.dispatchEvent(new StorageEvent('storage', {
@@ -823,7 +823,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
               newValue: JSON.stringify(recentNotifications),
             }))
           } else {
-            console.log('⚠️ Notification already exists for this job')
+            console.log('Notification already exists for this job')
           }
         } catch (err) {
           console.error('Error creating worker notification:', err)
