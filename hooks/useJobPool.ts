@@ -397,7 +397,7 @@ export function useJobPool() {
           }) as `0x${string}`
           
           if (atomId && atomId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-            console.warn(`   ⚠️ Job atom ID exists (${atomId}) but job struct is missing - possible contract state inconsistency`)
+            console.warn(`   Job atom ID exists (${atomId}) but job struct is missing - possible contract state inconsistency`)
           } else {
             console.warn(`   Job atom ID is also zero - job was never created`)
           }
@@ -426,7 +426,7 @@ export function useJobPool() {
             
             if (result && result[0] && result[0] !== '0x0000000000000000000000000000000000000000') {
               retrySuccess = true
-              console.log(`✅ Job ${jobId.toString()} found after retry ${attempt + 1}`)
+              console.log(`Job ${jobId.toString()} found after retry ${attempt + 1}`)
               break
             }
           } catch (retryErr) {
