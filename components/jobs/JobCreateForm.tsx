@@ -15,7 +15,7 @@ interface JobCreateFormProps {
 export function JobCreateForm({ onSuccess, onCancel }: JobCreateFormProps) {
   const { address, isConnected } = useAccount()
   const publicClient = usePublicClient()
-  const { createJob, isWriting, isConfirming, isConfirmed, hash, writeError } = useJobPool()
+  const { createJob, isWriting, isConfirming, isConfirmed, hash, writeError, refetchJobCount } = useJobPool()
   const { userAtomId, loading: userAtomLoading } = useUserAtom()
   
   const [formData, setFormData] = useState({
@@ -162,6 +162,12 @@ export function JobCreateForm({ onSuccess, onCancel }: JobCreateFormProps) {
                 
                 // Trigger job list refresh after a short delay to ensure job is indexed
                 setTimeout(() => {
+                  // Refetch jobCount first to update the count
+                  if (refetchJobCount) {
+                    console.log('[INFO] Refetching jobCount...')
+                    refetchJobCount()
+                  }
+                  // Then trigger job list refresh
                   if ((window as any).__refreshJobList) {
                     console.log('[INFO] Triggering job list refresh...')
                     ;(window as any).__refreshJobList()
