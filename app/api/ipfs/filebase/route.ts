@@ -73,18 +73,18 @@ export async function POST(request: NextRequest) {
       const isFullRes = uploadType?.includes('submission-full-res')
       
       console.log(`[Upload] Image detected: type="${uploadType}", isSubmissionPreview=${isSubmissionPreview}, isFullRes=${isFullRes}`)
-      console.log(`[Upload] ⚠️ CRITICAL: If isFullRes=${isFullRes}, image will be uploaded WITHOUT watermark`)
+      console.log(`[Upload] CRITICAL: If isFullRes=${isFullRes}, image will be uploaded WITHOUT watermark`)
       
       // Skip processing for full resolution images - upload as-is
       if (isFullRes) {
-        console.log(`[Upload] ✅✅✅ FULL RESOLUTION IMAGE DETECTED ✅✅✅`)
-        console.log(`[Upload] ✅ Uploading original without ANY processing (no compression, no watermark)`)
-        console.log(`[Upload] ✅ Original buffer size: ${buffer.length} bytes`)
-        console.log(`[Upload] ✅ This image will be stored EXACTLY as received - NO watermark will be added`)
+        console.log(`[Upload] FULL RESOLUTION IMAGE DETECTED`)
+        console.log(`[Upload] Uploading original without ANY processing (no compression, no watermark)`)
+        console.log(`[Upload] Original buffer size: ${buffer.length} bytes`)
+        console.log(`[Upload] This image will be stored EXACTLY as received - NO watermark will be added`)
         // Keep original buffer, no processing - upload exactly as received
         finalBuffer = buffer
-        console.log(`[Upload] ✅ Full resolution image will be uploaded as-is: ${finalBuffer.length} bytes`)
-        console.log(`[Upload] ✅✅✅ END FULL RESOLUTION UPLOAD ✅✅✅`)
+        console.log(`[Upload] Full resolution image will be uploaded as-is: ${finalBuffer.length} bytes`)
+        console.log(`[Upload] END FULL RESOLUTION UPLOAD`)
       } else {
         const opts = {
           maxWidth: isSubmissionPreview 
