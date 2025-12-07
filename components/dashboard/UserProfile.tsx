@@ -92,32 +92,85 @@ export function UserProfile({ address }: UserProfileProps) {
         console.log('[STATS] Profile data received:', {
           hasAtom: !!profileData.atom,
           atomId: profileData.atom?.id,
-          trustScore: profileData.trustScore?.score
+          trustScore: profileData.trustScore?.score,
+          profileDataKeys: Object.keys(profileData.profileData || {}),
+          profileDataSample: profileData.profileData
         })
         
         const { atom: userAtom, trustScore, completedJobs: apiCompletedJobs, createdArtworks, profileData: atomData } = profileData
+        
+        console.log('[DEBUG] Extracted data:', {
+          hasUserAtom: !!userAtom,
+          atomDataKeys: Object.keys(atomData || {}),
+          name: atomData?.name,
+          bio: atomData?.bio,
+          email: atomData?.email
+        })
         
         // Count completed jobs from localStorage (more accurate)
         const storageCompletedJobs = countCompletedJobsFromStorage()
         const completedJobs = Math.max(apiCompletedJobs, storageCompletedJobs)
 
         if (userAtom) {
-          setUserData({
+          // Also check atom.data directly as a fallback if atomData is empty
+          let finalAtomData = atomData || {}
+          
+          // If atomData is empty, try to extract from userAtom.data
+          if (Object.keys(finalAtomData).length === 0 && userAtom.data) {
+            console.log('[FALLBACK] atomData is empty, checking userAtom.data directly...')
+            try {
+              if (typeof userAtom.data === 'string') {
+                finalAtomData = JSON.parse(userAtom.data)
+              } else if (typeof userAtom.data === 'object' && userAtom.data !== null) {
+                finalAtomData = userAtom.data
+              }
+              console.log('[FALLBACK] Extracted from userAtom.data:', Object.keys(finalAtomData))
+            } catch (e) {
+              console.warn('[FALLBACK] Failed to parse userAtom.data:', e)
+            }
+          }
+          
+          const newUserData = {
             atom: userAtom,
             trustScore,
             completedJobs,
             createdArtworks,
-            bio: atomData?.bio || '',
-            name: atomData?.name || '',
-            email: atomData?.email || '',
-            website: atomData?.website || '',
+            bio: finalAtomData?.bio || finalAtomData?.description || '',
+            name: finalAtomData?.name || finalAtomData?.displayName || '',
+            email: finalAtomData?.email || '',
+            website: finalAtomData?.website || finalAtomData?.url || '',
             socialLinks: {
-              twitter: atomData?.twitter || '',
-              github: atomData?.github || '',
-              behance: atomData?.behance || '',
-              dribbble: atomData?.dribbble || '',
+              twitter: finalAtomData?.twitter || '',
+              github: finalAtomData?.github || '',
+              behance: finalAtomData?.behance || '',
+              dribbble: finalAtomData?.dribbble || '',
             },
+          }
+          setUserData(newUserData)
+          
+          // Initialize editForm with fetched data
+          setEditForm({
+            name: newUserData.name,
+            bio: newUserData.bio,
+            email: newUserData.email,
+            website: newUserData.website,
+            twitter: newUserData.socialLinks.twitter || '',
+            github: newUserData.socialLinks.github || '',
+            behance: newUserData.socialLinks.behance || '',
+            dribbble: newUserData.socialLinks.dribbble || '',
           })
+          
+          console.log('[SUCCESS] User data set:', {
+            name: newUserData.name,
+            bio: newUserData.bio,
+            email: newUserData.email,
+            website: newUserData.website,
+            hasAtom: !!newUserData.atom,
+            trustScore: newUserData.trustScore?.score,
+            atomDataKeys: Object.keys(finalAtomData),
+            source: Object.keys(atomData || {}).length > 0 ? 'triples' : 'atom.data'
+          })
+          
           setLoading(false)
           return
         }
@@ -156,6 +209,20 @@ export function UserProfile({ address }: UserProfileProps) {
     fetchBalance()
   }, [publicClient, address])
 
+  // Debug: Log current state (must be before any conditional returns)
+  useEffect(() => {
+    if (address && !loading) {
+      console.log('[UserProfile] Current state:', {
+        hasAtom: !!userData.atom,
+        atomId: userData.atom?.id || userData.atom?.term_id,
+        name: userData.name,
+        bio: userData.bio,
+        email: userData.email,
+        trustScore: userData.trustScore?.score
+      })
+    }
+  }, [userData, address, loading])
+
   const handleSave = async () => {
     const atomId = userData.atom?.term_id || userData.atom?.id
     if (!atomId) {
@@ -174,7 +241,7 @@ export function UserProfile({ address }: UserProfileProps) {
       return
     }
     
-    console.log('💾 Updating profile on-chain with atom ID:', atomId)
+    console.log('Updating profile on-chain with atom ID:', atomId)
     console.log('[SUCCESS] Wallet connected:', { isConnected, address, chainId: chain?.id })
 
     try {
@@ -487,6 +554,20 @@ export function UserProfile({ address }: UserProfileProps) {
     return { level: 'New', color: 'bg-gray-100 text-gray-900' }
   }
 
+  // Debug: Log current state (must be before any conditional returns)
+  useEffect(() => {
+    if (address && !loading) {
+      console.log('[UserProfile] Current state:', {
+        hasAtom: !!userData.atom,
+        atomId: userData.atom?.id || userData.atom?.term_id,
+        name: userData.name,
+        bio: userData.bio,
+        email: userData.email,
+        trustScore: userData.trustScore?.score
+      })
+    }
+  }, [userData, address, loading])
+
   if (loading) {
     return (
       <div className="bg-white rounded-2xl shadow-card p-6">
@@ -500,7 +581,8 @@ export function UserProfile({ address }: UserProfileProps) {
   }
 
   // If no profile exists, show create profile message
-  if (!userData.atom) {
+  // Only show this if we're not loading AND we've confirmed there's no atom
+  if (!loading && !userData.atom) {
     return (
       <div className="bg-white rounded-2xl shadow-card p-6">
         <div className="text-center py-12">
@@ -511,9 +593,7 @@ export function UserProfile({ address }: UserProfileProps) {
           </div>
           <h3 className="text-xl font-semibold text-gray-900 mb-2">No Profile Found</h3>
           <p className="text-gray-600 mb-4">
-            {loading 
-              ? 'Checking for your profile...' 
-              : 'You haven\'t created a profile yet, or it hasn\'t been indexed yet. If you just created a profile, wait 10-30 seconds and refresh.'}
+            You haven't created a profile yet, or it hasn't been indexed yet. If you just created a profile, wait 10-30 seconds and refresh.
           </p>
           {!loading && (
             <>
@@ -562,6 +642,7 @@ export function UserProfile({ address }: UserProfileProps) {
 
   const handleRefresh = async () => {
     if (fetchUserDataRef.current) {
+      setLoading(true)
       await fetchUserDataRef.current()
     }
   }
@@ -605,22 +686,31 @@ export function UserProfile({ address }: UserProfileProps) {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl shadow-card p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Profile Information</h2>
-        <div className="flex items-center gap-2">
+      <div className="bg-white rounded-2xl shadow-card p-8">
+      <div className="flex items-center justify-between mb-8 pb-6 border-b border-gray-200">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-1">Profile Information</h2>
+          <p className="text-sm text-gray-500">Manage your personal details and social links</p>
+        </div>
+        <div className="flex items-center gap-3">
           <button
             onClick={handleRefresh}
-            className="px-3 py-2 text-sm font-medium rounded-full border border-gray-300 text-gray-900 hover:border-primary hover:text-primary transition-colors"
+            className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:border-primary hover:text-primary hover:bg-primary/5 transition-all flex items-center gap-2"
             title="Refresh profile data"
           >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
             Refresh
           </button>
           {!isEditing ? (
             <button
               onClick={() => setIsEditing(true)}
-              className="px-4 py-2 text-sm font-medium rounded-full border border-gray-300 text-gray-900 hover:border-primary hover:text-primary transition-colors"
+              className="px-5 py-2.5 text-sm font-semibold rounded-lg bg-primary text-white hover:bg-[#0052CC] transition-all shadow-sm hover:shadow-md flex items-center gap-2"
             >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
               Edit Profile
             </button>
           ) : (
@@ -639,16 +729,31 @@ export function UserProfile({ address }: UserProfileProps) {
                   dribbble: userData.socialLinks.dribbble || '',
                 })
               }}
-              className="px-4 py-2 text-sm font-medium rounded-full border border-gray-300 text-gray-900 hover:border-gray-400 transition-colors"
+              className="px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-50 transition-all"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
               disabled={isWriting || isConfirming || loading}
-              className="px-4 py-2 text-sm font-medium rounded-full bg-primary text-white hover:bg-[#0052CC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-5 py-2.5 text-sm font-semibold rounded-lg bg-primary text-white hover:bg-[#0052CC] transition-all shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              {isWriting || isConfirming ? 'Processing...' : 'Save Changes'}
+              {isWriting || isConfirming ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  Save Changes
+                </>
+              )}
             </button>
           </div>
           )}
@@ -657,47 +762,47 @@ export function UserProfile({ address }: UserProfileProps) {
 
       <div className="space-y-6">
         {/* Wallet Address & Balance */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+        <div className="bg-white rounded-xl p-5 border border-gray-200">
+          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
             Wallet Address
           </label>
-          <p className="text-sm text-gray-900 font-mono bg-gray-50 px-3 py-2 rounded-lg">
+          <p className="text-base text-gray-900 font-mono bg-gray-50 px-4 py-3 rounded-lg border border-gray-200">
             {address}
           </p>
           {walletBalance !== null && (
-            <p className="mt-1 text-xs text-gray-600">
-              Balance:{' '}
-              <span className="font-semibold text-primary">
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-sm text-gray-600">Balance:</span>
+              <span className="text-lg font-bold text-gray-900">
                 {Number(walletBalance).toLocaleString(undefined, { maximumFractionDigits: 4 })}
-              </span>{' '}
-              TRUST
-            </p>
+              </span>
+              <span className="text-sm font-medium text-gray-600">TRUST</span>
+            </div>
           )}
         </div>
 
         {/* Trust Score & Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-xs text-gray-600 mb-1">Trust Score</div>
-            <div className="text-2xl font-bold text-primary">
+          <div className="bg-white rounded-xl p-5 border border-gray-200">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Trust Score</div>
+            <div className="text-3xl font-bold text-gray-900">
               {userData.trustScore?.score.toLocaleString() || '0'}
             </div>
           </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-xs text-gray-600 mb-1">Trust Level</div>
-            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${trustInfo.color}`}>
+          <div className="bg-white rounded-xl p-5 border border-gray-200">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Trust Level</div>
+            <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold ${trustInfo.color} border`}>
               {trustInfo.level}
             </span>
           </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-xs text-gray-600 mb-1">Completed Jobs</div>
-            <div className="text-2xl font-bold text-gray-900">
+          <div className="bg-white rounded-xl p-5 border border-gray-200">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Completed Jobs</div>
+            <div className="text-3xl font-bold text-gray-900">
               {userData.completedJobs}
             </div>
           </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-xs text-gray-600 mb-1">Artworks</div>
-            <div className="text-2xl font-bold text-gray-900">
+          <div className="bg-white rounded-xl p-5 border border-gray-200">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Artworks</div>
+            <div className="text-3xl font-bold text-gray-900">
               {userData.createdArtworks}
             </div>
           </div>
@@ -705,24 +810,24 @@ export function UserProfile({ address }: UserProfileProps) {
 
         {/* Name */}
         {isEditing ? (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <div className="bg-white rounded-xl p-5 border border-gray-200">
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
               Name
             </label>
             <input
               type="text"
               value={editForm.name}
               onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
               placeholder="Your name"
             />
           </div>
         ) : (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <div className="bg-white rounded-xl p-5 border border-gray-200">
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
               Name
             </label>
-            <p className="text-sm text-gray-900">
+            <p className="text-xl font-bold text-gray-900">
               {userData.name || 'Not set'}
             </p>
           </div>
@@ -730,24 +835,24 @@ export function UserProfile({ address }: UserProfileProps) {
 
         {/* Bio */}
         {isEditing ? (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <div className="bg-white rounded-xl p-5 border border-gray-200">
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
               Bio
             </label>
             <textarea
               value={editForm.bio}
               onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
               rows={4}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all resize-none"
               placeholder="Tell us about yourself..."
             />
           </div>
         ) : (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <div className="bg-white rounded-xl p-5 border border-gray-200">
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
               Bio
             </label>
-            <p className="text-sm text-gray-900 whitespace-pre-wrap">
+            <p className="text-base text-gray-800 leading-relaxed whitespace-pre-wrap">
               {userData.bio || 'No bio added yet'}
             </p>
           </div>
@@ -757,52 +862,58 @@ export function UserProfile({ address }: UserProfileProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {isEditing ? (
             <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+              <div className="bg-white rounded-xl p-5 border border-gray-200">
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
                   Email
                 </label>
                 <input
                   type="email"
                   value={editForm.email}
                   onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
                   placeholder="your@email.com"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+              <div className="bg-white rounded-xl p-5 border border-gray-200">
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
                   Website
                 </label>
                 <input
                   type="url"
                   value={editForm.website}
                   onChange={(e) => setEditForm({ ...editForm, website: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
                   placeholder="https://yourwebsite.com"
                 />
               </div>
             </>
           ) : (
             <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+              <div className="bg-white rounded-xl p-5 border border-gray-200">
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
                   Email
                 </label>
-                <p className="text-sm text-gray-900">
-                  {userData.email || 'Not set'}
+                <p className="text-base font-medium text-gray-900 break-all">
+                  {userData.email ? (
+                    <a href={`mailto:${userData.email}`} className="text-primary hover:underline">
+                      {userData.email}
+                    </a>
+                  ) : (
+                    <span className="text-gray-400">Not set</span>
+                  )}
                 </p>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+              <div className="bg-white rounded-xl p-5 border border-gray-200">
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
                   Website
                 </label>
-                <p className="text-sm text-gray-900">
+                <p className="text-base font-medium text-gray-900">
                   {userData.website ? (
-                    <a href={userData.website} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                    <a href={userData.website} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">
                       {userData.website}
                     </a>
                   ) : (
-                    'Not set'
+                    <span className="text-gray-400">Not set</span>
                   )}
                 </p>
               </div>
@@ -811,63 +922,68 @@ export function UserProfile({ address }: UserProfileProps) {
         </div>
 
         {/* Social Links */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+        <div className="bg-white rounded-xl p-5 border border-gray-200">
+          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
             Social Links
           </label>
           {isEditing ? (
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs text-gray-600 mb-1">Twitter</label>
+                <label className="block text-xs font-medium text-gray-600 mb-2">Twitter</label>
                 <input
                   type="text"
                   value={editForm.twitter}
                   onChange={(e) => setEditForm({ ...editForm, twitter: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
                   placeholder="@username"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-600 mb-1">GitHub</label>
+                <label className="block text-xs font-medium text-gray-600 mb-2">GitHub</label>
                 <input
                   type="text"
                   value={editForm.github}
                   onChange={(e) => setEditForm({ ...editForm, github: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
                   placeholder="username"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-600 mb-1">Behance</label>
+                <label className="block text-xs font-medium text-gray-600 mb-2">Behance</label>
                 <input
                   type="text"
                   value={editForm.behance}
                   onChange={(e) => setEditForm({ ...editForm, behance: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
                   placeholder="username"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-600 mb-1">Dribbble</label>
+                <label className="block text-xs font-medium text-gray-600 mb-2">Dribbble</label>
                 <input
                   type="text"
                   value={editForm.dribbble}
                   onChange={(e) => setEditForm({ ...editForm, dribbble: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
                   placeholder="username"
                 />
               </div>
             </div>
           ) : (
-            <div className="flex flex-wrap gap-3">
+            <div className="space-y-3">
               {userData.socialLinks.twitter && (
                 <a
                   href={`https://twitter.com/${userData.socialLinks.twitter.replace('@', '')}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-primary hover:underline"
+                  className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-primary hover:shadow-md transition-all group"
                 >
-                  Twitter: {userData.socialLinks.twitter}
+                  <svg className="w-5 h-5 text-[#1DA1F2]" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M23 3a10.9 10.9 0 01-3.14 1.53 4.48 4.48 0 00-7.86 3v1A10.66 10.66 0 013 4s-4 9 5 13a11.64 11.64 0 01-7 2c9 5 20 0 20-11.5a4.5 4.5 0 00-.08-.83A7.72 7.72 0 0023 3z"/>
+                  </svg>
+                  <span className="text-base font-medium text-gray-900 group-hover:text-primary transition-colors">
+                    {userData.socialLinks.twitter}
+                  </span>
                 </a>
               )}
               {userData.socialLinks.github && (
@@ -875,9 +991,14 @@ export function UserProfile({ address }: UserProfileProps) {
                   href={`https://github.com/${userData.socialLinks.github}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-primary hover:underline"
+                  className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-primary hover:shadow-md transition-all group"
                 >
-                  GitHub: {userData.socialLinks.github}
+                  <svg className="w-5 h-5 text-gray-900" fill="currentColor" viewBox="0 0 24 24">
+                    <path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clipRule="evenodd"/>
+                  </svg>
+                  <span className="text-base font-medium text-gray-900 group-hover:text-primary transition-colors">
+                    {userData.socialLinks.github}
+                  </span>
                 </a>
               )}
               {userData.socialLinks.behance && (
@@ -885,9 +1006,14 @@ export function UserProfile({ address }: UserProfileProps) {
                   href={`https://behance.net/${userData.socialLinks.behance}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-primary hover:underline"
+                  className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-primary hover:shadow-md transition-all group"
                 >
-                  Behance: {userData.socialLinks.behance}
+                  <svg className="w-5 h-5 text-[#1769FF]" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M22 7h-7v-2h7v2zm1.726 10c-.442 1.297-2.029 3-5.101 3-3.074 0-5.564-1.729-5.564-5.675 0-3.91 2.325-5.92 5.466-5.92 3.082 0 4.964 1.782 5.375 4.426.078.506.109 1.188.095 2.14h-8.027c.13 3.211 3.483 3.312 4.925 2.059.3-.504.473-1.115.473-1.823h4.915zm-7.688-6.5c0-2.266-1.329-3.5-3.01-3.5-1.673 0-3.01 1.234-3.01 3.5 0 2.266 1.337 3.5 3.01 3.5 1.681 0 3.01-1.234 3.01-3.5zM5.526 6.5c-.552 0-1 .45-1 1s.448 1 1 1 1-.45 1-1-.448-1-1-1zm-2.776 1.5h5.599c.551 0 .999.45.999 1v11h-2.827v-4.333H1.854v4.333H0V9c0-.55.448-1 .999-1zm16.75 5.75c0 .553-.448 1-1 1h-4.001c.551 0 .999.45.999 1 0 .553-.448 1-.999 1h-2.001c-.551 0-.999-.447-.999-1v-5c0-.553.448-1 .999-1h5.002c.551 0 .999.447.999 1v3z"/>
+                  </svg>
+                  <span className="text-base font-medium text-gray-900 group-hover:text-primary transition-colors">
+                    {userData.socialLinks.behance}
+                  </span>
                 </a>
               )}
               {userData.socialLinks.dribbble && (
@@ -895,14 +1021,19 @@ export function UserProfile({ address }: UserProfileProps) {
                   href={`https://dribbble.com/${userData.socialLinks.dribbble}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-primary hover:underline"
+                  className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-primary hover:shadow-md transition-all group"
                 >
-                  Dribbble: {userData.socialLinks.dribbble}
+                  <svg className="w-5 h-5 text-[#EA4C89]" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 24C5.385 24 0 18.615 0 12S5.385 0 12 0s12 5.385 12 12-5.385 12-12 12zm10.12-10.358c-.35-.11-3.17-.953-6.384-.438 1.34 3.684 1.887 6.684 1.992 7.308 2.3-1.555 3.936-4.02 4.395-6.87zm-6.115 7.808c-.153-.9-.75-4.032-2.19-7.77l-.066.02c-5.79 2.015-7.86 6.025-8.003 6.4 1.23.66 2.80 1.048 4.435 1.048 1.485 0 2.93-.256 4.212-.68zm-9.96-5.09c.232-.4 3.045-5.055 8.332-6.765.135-.045.27-.084.405-.12-.26-.585-.54-1.167-.832-1.72C7.17 11.775 2.206 11.71 1.756 11.7l-.004.312c0 2.633.998 5.037 2.634 6.855zm-2.42-8.955c.232.4 3.045 5.055 8.332 6.765.135.045.27.084.405.12.26-.585.54-1.167.832-1.72-6.155-2.83-10.867-2.88-11.569-2.88zm11.774 2.953c-3.225-.516-6.03.325-6.414.438a10.12 10.12 0 0 1 4.395-6.87c.105.624.652 3.684 2.02 7.308zm-5.84 2.55c.232-.4 3.045-5.055 8.332-6.765.135-.045.27-.084.405-.12-.26-.585-.54-1.167-.832-1.72-6.155 2.83-10.867 2.88-11.569 2.88l.004-.312c0-1.633.998-3.037 2.634-4.855z"/>
+                  </svg>
+                  <span className="text-base font-medium text-gray-900 group-hover:text-primary transition-colors">
+                    {userData.socialLinks.dribbble}
+                  </span>
                 </a>
               )}
               {!userData.socialLinks.twitter && !userData.socialLinks.github && 
                !userData.socialLinks.behance && !userData.socialLinks.dribbble && (
-                <p className="text-sm text-gray-500">No social links added</p>
+                <p className="text-sm text-gray-400 italic">No social links added</p>
               )}
             </div>
           )}
