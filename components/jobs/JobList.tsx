@@ -71,9 +71,9 @@ export function JobList({ onCreateJob, refreshRef }: JobListProps) {
         jobPromises.push(
           getJobWithRetry(i).then(job => {
             if (job) {
-              console.log(`✅ Job ${i.toString()} loaded successfully`)
+              console.log(`Job ${i.toString()} loaded successfully`)
             } else {
-              console.warn(`⚠️ Job ${i.toString()} could not be loaded after retries`)
+              console.warn(`Job ${i.toString()} could not be loaded after retries`)
             }
             return { jobId: i, job }
           })
@@ -98,13 +98,13 @@ export function JobList({ onCreateJob, refreshRef }: JobListProps) {
       if (failedJobs.length > 0) {
         const failedIds = failedJobs.map(({ jobId }) => jobId)
         setFailedJobIds(failedIds)
-        console.warn(`⚠️ ${failedJobs.length} job(s) could not be loaded:`, failedIds.map(id => id.toString()))
+        console.warn(`${failedJobs.length} job(s) could not be loaded:`, failedIds.map(id => id.toString()))
         console.warn('   This might be due to indexing delays. Try refreshing in a few moments.')
       } else {
         setFailedJobIds([])
       }
       
-      console.log(`✅ Found ${validJobs.length} valid jobs out of ${jobCount.toString()} total`)
+      console.log(`Found ${validJobs.length} valid jobs out of ${jobCount.toString()} total`)
       validJobs.forEach(job => {
         console.log(`  Job ${job.jobId.toString()}: title="${(job as any).title || 'NOT SET'}", creator="${job.creator.substring(0, 10)}..."`)
       })
