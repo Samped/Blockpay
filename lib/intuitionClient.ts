@@ -1388,18 +1388,72 @@ export class IntuitionClient {
 
       const atomIdentifier = (userAtom as any).term_id || userAtom.id
 
-      // Use triple-based profile data only (no legacy JSON fallback)
-      const profileData: Record<string, any> = await this.fetchProfileTriples(atomIdentifier)
+      // First, try triple-based profile data (preferred method)
+      let profileData: Record<string, any> = await this.fetchProfileTriples(atomIdentifier)
       
-      console.log('[STATS] Profile data extracted:', {
+      console.log('[STATS] Profile data from triples:', {
         keys: Object.keys(profileData),
         has_name: !!profileData.name,
         has_bio: !!profileData.bio,
-        has_address: !!profileData.address
+        has_address: !!profileData.address,
+        isEmpty: Object.keys(profileData).length === 0
       })
+
+      // If triples don't have data, fall back to checking atom's data field (JSON format)
+      if (Object.keys(profileData).length === 0 && userAtom.data) {
+        console.log('[FALLBACK] No triples found, checking atom.data field for JSON format...')
+        try {
+          let atomData: any = {}
+          
+          // Parse atom.data if it's a string
+          if (typeof userAtom.data === 'string') {
+            try {
+              atomData = JSON.parse(userAtom.data)
+              console.log('[FALLBACK] Parsed JSON from atom.data string:', Object.keys(atomData))
+            } catch (e) {
+              console.warn('[FALLBACK] Failed to parse atom.data as JSON:', e)
+            }
+          } else if (typeof userAtom.data === 'object' && userAtom.data !== null) {
+            atomData = userAtom.data
+            console.log('[FALLBACK] Using atom.data object directly:', Object.keys(atomData))
+          }
+
+          // Extract profile fields from atom data
+          if (atomData && typeof atomData === 'object') {
+            profileData = {
+              name: atomData.name || atomData.displayName || '',
+              bio: atomData.bio || atomData.description || '',
+              email: atomData.email || '',
+              website: atomData.website || atomData.url || '',
+              twitter: atomData.twitter || '',
+              github: atomData.github || '',
+              behance: atomData.behance || '',
+              dribbble: atomData.dribbble || '',
+              address: atomData.address || atomData.wallet || walletAddress,
+            }
+            
+            console.log('[FALLBACK] Extracted profile data from atom.data:', {
+              keys: Object.keys(profileData),
+              has_name: !!profileData.name,
+              has_bio: !!profileData.bio,
+              has_email: !!profileData.email
+            })
+          }
+        } catch (err) {
+          console.warn('[FALLBACK] Error extracting data from atom.data:', err)
+        }
+      }
 
       // Update atom.data with parsed data for consistency
       userAtom.data = profileData
+      
+      console.log('[STATS] Final profile data:', {
+        keys: Object.keys(profileData),
+        has_name: !!profileData.name,
+        has_bio: !!profileData.bio,
+        has_email: !!profileData.email,
+        has_website: !!profileData.website
+      })
 
       // Fetch trust score (non-blocking)
       let trustScore: TrustScore | null = null
