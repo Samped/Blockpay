@@ -12,8 +12,13 @@ const poppins = Poppins({
 })
 
 export const metadata: Metadata = {
-  title: 'BlockPay - Decentralized Creative Marketplace',
+  title: 'BlockPay',
   description: 'A trust-anchored decentralized marketplace for creators, designers, builders, and artists built on Intuition\'s Knowledge Graph',
+  icons: {
+    icon: '/logo.png',
+    shortcut: '/logo.png',
+    apple: '/logo.png',
+  },
 }
 
 export default function RootLayout({
