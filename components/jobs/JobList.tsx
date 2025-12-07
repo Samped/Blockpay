@@ -11,7 +11,7 @@ interface JobListProps {
 }
 
 export function JobList({ onCreateJob, refreshRef }: JobListProps) {
-  const { jobCount, getJob } = useJobPool()
+  const { jobCount, getJob, publicClient } = useJobPool()
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedJobId, setSelectedJobId] = useState<bigint | null>(null)
@@ -19,17 +19,29 @@ export function JobList({ onCreateJob, refreshRef }: JobListProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all')
   const [failedJobIds, setFailedJobIds] = useState<bigint[]>([])
+  const [retryingJobs, setRetryingJobs] = useState<Set<bigint>>(new Set())
 
   // Refresh when jobCount changes or manually triggered
   useEffect(() => {
-    loadJobs()
+    if (jobCount !== undefined) {
+      loadJobs()
+    }
   }, [jobCount, refreshKey])
+  
+  // Add missing dependency warning fix
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 
   async function loadJobs() {
     console.log('Loading jobs, jobCount:', jobCount?.toString())
     
-    if (!jobCount || jobCount === 0n) {
-      console.log('No jobs found (jobCount is 0 or undefined)')
+    if (jobCount === undefined) {
+      console.log('JobCount is undefined, waiting for it to load...')
+      setLoading(false)
+      return // Don't clear jobs if jobCount is just not loaded yet
+    }
+    
+    if (jobCount === 0n) {
+      console.log('No jobs found (jobCount is 0)')
       setLoading(false)
       setJobs([])
       return
@@ -41,50 +53,144 @@ export function JobList({ onCreateJob, refreshRef }: JobListProps) {
       
       const jobPromises: Array<Promise<{ jobId: bigint; job: Job | null }>> = []
       
-      // Helper function to retry getting a job with exponential backoff
-      const getJobWithRetry = async (jobId: bigint, maxRetries = 3): Promise<Job | null> => {
+      // Helper function to get a job with retry logic for jobs that have atomIds
+      const getJobWithRetry = async (jobId: bigint, hasAtomId: boolean, timeoutMs = 5000): Promise<Job | null> => {
+        const maxRetries = hasAtomId ? 3 : 1 // Retry up to 3 times if atomId exists
+        
         for (let attempt = 0; attempt < maxRetries; attempt++) {
           try {
-            const job = await getJob(jobId)
-            if (job) {
-              return job
-            }
-            // If job is null, wait before retrying (exponential backoff)
-            if (attempt < maxRetries - 1) {
-              const delay = Math.min(1000 * Math.pow(2, attempt), 5000) // Max 5 seconds
-              console.log(`Job ${jobId.toString()} not found, retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`)
-              await new Promise(resolve => setTimeout(resolve, delay))
+            // Create a timeout promise
+            const timeoutPromise = new Promise<null>((resolve) => {
+              setTimeout(() => resolve(null), timeoutMs)
+            })
+            
+            // Race between getting the job and timeout
+            const jobPromise = getJob(jobId)
+            const result = await Promise.race([jobPromise, timeoutPromise])
+            
+            if (result) {
+              // If result has zero address creator (not fully loaded), try again or return null
+              if (result.creator === '0x0000000000000000000000000000000000000000') {
+                console.log(`Job ${jobId.toString()} has zero address creator, will be filtered out`)
+                // Try one more time if we have retries left
+                if (attempt < maxRetries - 1 && hasAtomId) {
+                  console.log(`Retrying job ${jobId.toString()} (attempt ${attempt + 2}/${maxRetries})...`)
+                  await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)))
+                  continue
+                }
+                return null // Filter out jobs that aren't fully loaded
+              }
+              return result
+            } else {
+              // If timeout and we have retries left, try again
+              if (attempt < maxRetries - 1 && hasAtomId) {
+                console.log(`Job ${jobId.toString()} timed out, retrying (attempt ${attempt + 2}/${maxRetries})...`)
+                await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)))
+                continue
+              }
+              console.warn(`Job ${jobId.toString()} fetch timed out after ${timeoutMs}ms (attempt ${attempt + 1}/${maxRetries})`)
+              return null
             }
           } catch (err) {
             console.error(`Error fetching job ${jobId.toString()} (attempt ${attempt + 1}):`, err)
-            if (attempt < maxRetries - 1) {
-              const delay = Math.min(1000 * Math.pow(2, attempt), 5000)
-              await new Promise(resolve => setTimeout(resolve, delay))
+            if (attempt < maxRetries - 1 && hasAtomId) {
+              await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)))
+              continue
             }
+            return null
           }
         }
         return null
       }
       
+      // First, check all jobAtomIds in parallel to see which jobs exist
+      // This helps us show jobs even if the struct fails to load
+      const atomIdPromises: Array<Promise<{ jobId: bigint; atomId: `0x${string}` | null }>> = []
+      if (publicClient) {
+        for (let i = 1n; i <= jobCount; i++) {
+          atomIdPromises.push(
+            (async () => {
+              try {
+                const { JOB_POOL_ADDRESS, JOB_POOL_ABI } = await import('@/lib/jobPoolContract')
+                const atomId = await publicClient.readContract({
+                  address: JOB_POOL_ADDRESS as `0x${string}`,
+                  abi: JOB_POOL_ABI,
+                  functionName: 'jobAtomIds',
+                  args: [i],
+                }) as `0x${string}`
+                return { 
+                  jobId: i, 
+                  atomId: atomId !== '0x0000000000000000000000000000000000000000000000000000000000000000' ? atomId : null 
+                }
+              } catch (err) {
+                console.warn(`Could not check atomId for job ${i.toString()}:`, err)
+                return { jobId: i, atomId: null }
+              }
+            })()
+          )
+        }
+      }
+
+      // Wait for atomId checks (with timeout)
+      const atomIdResults = publicClient 
+        ? await Promise.allSettled(atomIdPromises).then(results => 
+            results.map((result, index) => 
+              result.status === 'fulfilled' 
+                ? result.value 
+                : { jobId: BigInt(index + 1), atomId: null }
+            )
+          )
+        : []
+
       // Load all jobs from 1 to jobCount with retry logic
+      // Check which jobs have atomIds first to determine retry strategy
+      const atomIdMap = new Map<bigint, `0x${string}` | null>()
+      atomIdResults.forEach(({ jobId, atomId }) => {
+        atomIdMap.set(jobId, atomId)
+      })
+
       for (let i = 1n; i <= jobCount; i++) {
+        const hasAtomId = !!atomIdMap.get(i)
         jobPromises.push(
-          getJobWithRetry(i).then(job => {
+          getJobWithRetry(i, hasAtomId, 5000).then(job => {
             if (job) {
               console.log(`Job ${i.toString()} loaded successfully`)
             } else {
-              console.warn(`Job ${i.toString()} could not be loaded after retries`)
+              console.warn(`Job ${i.toString()} could not be loaded (timed out or not found)`)
             }
             return { jobId: i, job }
+          }).catch(err => {
+            console.error(`Error loading job ${i.toString()}:`, err)
+            return { jobId: i, job: null }
           })
         )
       }
 
-      const jobResults = await Promise.all(jobPromises)
+      // Wait for all jobs with a reasonable timeout
+      const jobResults = await Promise.allSettled(jobPromises).then(results => {
+        return results.map((result, index) => {
+          if (result.status === 'fulfilled') {
+            return result.value
+          } else {
+            console.error(`Job ${(index + 1).toString()} promise rejected:`, result.reason)
+            return { jobId: BigInt(index + 1), job: null }
+          }
+        })
+      })
       console.log(`Loaded ${jobResults.length} job results`)
-      
+
+      // Only include jobs that have fully loaded (no "Loading..." or "Indexing..." state)
+      // Exclude jobs with zero address creators (not fully indexed)
       const validJobs = jobResults
-        .filter(({ job }) => job !== null)
+        .filter(({ jobId, job }) => {
+          // Only include if job loaded successfully and has valid creator
+          if (job !== null && job.creator !== '0x0000000000000000000000000000000000000000') {
+            return true
+          }
+          // Exclude jobs that failed to load or have zero address
+          console.log(`Excluding job ${jobId.toString()} - not fully loaded (creator: ${job?.creator || 'null'})`)
+          return false
+        })
         .map(({ jobId, job }) => {
           const jobWithId = { ...job!, jobId } as Job & { jobId: bigint; title?: string; description?: string }
           // Ensure title is always set (fallback if metadata wasn't loaded)
@@ -99,7 +205,7 @@ export function JobList({ onCreateJob, refreshRef }: JobListProps) {
         const failedIds = failedJobs.map(({ jobId }) => jobId)
         setFailedJobIds(failedIds)
         console.warn(`${failedJobs.length} job(s) could not be loaded:`, failedIds.map(id => id.toString()))
-        console.warn('   This might be due to indexing delays. Try refreshing in a few moments.')
+        console.warn('   These jobs may not exist or are still being indexed. Try refreshing in a few moments.')
       } else {
         setFailedJobIds([])
       }
@@ -112,7 +218,16 @@ export function JobList({ onCreateJob, refreshRef }: JobListProps) {
       // Sort by job ID descending (newest first)
       validJobs.sort((a, b) => Number(b.jobId - a.jobId))
       
-      setJobs(validJobs as any)
+      // Only update jobs if we got at least some results, or if jobCount is 0
+      // This prevents clearing jobs if a reload fails
+      if (validJobs.length > 0 || jobCount === 0n) {
+        setJobs(validJobs as any)
+      } else {
+        console.warn('No valid jobs found but jobCount > 0, keeping existing jobs to prevent data loss')
+        // Don't clear jobs if reload failed - keep existing ones
+      }
+
+      // Note: Loading jobs are now filtered out, so no retry logic needed
     } catch (err) {
       console.error('Error loading jobs:', err)
     } finally {
