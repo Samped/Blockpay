@@ -88,7 +88,7 @@ export function CompletedJobs() {
       
       // If no jobs found, automatically recover from contract in background
       if (jobIds.length === 0) {
-        console.log('🔍 No completed jobs found, automatically recovering from contract in background...')
+        console.log('No completed jobs found, automatically recovering from contract in background...')
         try {
           const jobCount = await publicClient.readContract({
             address: JOB_POOL_ADDRESS as `0x${string}`,
@@ -184,7 +184,7 @@ export function CompletedJobs() {
               )
               return unique
             })
-            console.log(`✅ Auto-recovered ${recoveredJobs.length} completed jobs in background`)
+            console.log(`Auto-recovered ${recoveredJobs.length} completed jobs in background`)
           }
         } catch (err) {
           console.error('Error in background recovery:', err)
@@ -194,12 +194,12 @@ export function CompletedJobs() {
 
     const loadCompletedJobs = async () => {
       try {
-        console.log('🔍 Loading completed jobs for:', address.toLowerCase())
+        console.log('Loading completed jobs for:', address.toLowerCase())
         
         // Get list of completed job IDs for this creator
         const creatorCompletedJobsKey = `creator_completed_jobs_${address.toLowerCase()}`
         let jobIds = JSON.parse(localStorage.getItem(creatorCompletedJobsKey) || '[]')
-        console.log('📋 Found job IDs from list:', jobIds)
+        console.log('Found job IDs from list:', jobIds)
         
         // Also search for all completed_job keys in localStorage as fallback
         const allKeys: string[] = []
@@ -217,8 +217,8 @@ export function CompletedJobs() {
             }
           }
         }
-        console.log('📦 All completed_job keys found:', allKeys)
-        console.log('📋 Final job IDs list:', jobIds)
+        console.log('All completed_job keys found:', allKeys)
+        console.log('Final job IDs list:', jobIds)
         
         // Load each completed job's data
         const jobs: CompletedJob[] = []
@@ -226,13 +226,13 @@ export function CompletedJobs() {
         for (const item of jobIds) {
           const jobId = typeof item === 'string' ? item : item.jobId
           const jobKey = `completed_job_${jobId}_${address.toLowerCase()}`
-          console.log(`🔍 Checking job ${jobId}, key: ${jobKey}`)
+          console.log(`Checking job ${jobId}, key: ${jobKey}`)
           const jobData = localStorage.getItem(jobKey)
           
           if (jobData) {
             try {
               const job = JSON.parse(jobData)
-              console.log(`✅ Found job data for ${jobId}:`, {
+              console.log(`Found job data for ${jobId}:`, {
                 hasFullRes: !!job.fullResCID,
                 hasPreview: !!job.previewCID,
                 worker: job.worker,
@@ -240,7 +240,7 @@ export function CompletedJobs() {
               
               // If fullResCID is missing, try to fetch it from submission metadata
               if (!job.fullResCID && job.worker) {
-                console.log(`🔍 Attempting to recover fullResCID for job ${jobId}...`)
+                console.log(`Attempting to recover fullResCID for job ${jobId}...`)
                 try {
                   // Try to find submission metadata - check multiple possible keys
                   const possibleKeys = [
@@ -252,13 +252,13 @@ export function CompletedJobs() {
                   for (const submissionKey of possibleKeys) {
                     const submissionData = localStorage.getItem(submissionKey)
                     if (submissionData) {
-                      console.log(`📦 Found submission data in key: ${submissionKey}`)
+                      console.log(`Found submission data in key: ${submissionKey}`)
                       const submission = JSON.parse(submissionData)
                       const foundCID = submission.fullResCID || submission.metadata?.fullResCID
                       if (foundCID) {
                         job.fullResCID = foundCID
                         localStorage.setItem(jobKey, JSON.stringify(job))
-                        console.log(`✅ Recovered fullResCID from ${submissionKey} for job:`, jobId)
+                        console.log(`Recovered fullResCID from ${submissionKey} for job:`, jobId)
                         break
                       }
                     }
@@ -266,7 +266,7 @@ export function CompletedJobs() {
                   
                   // Try fetching from API as last resort
                   if (!job.fullResCID) {
-                    console.log(`🌐 Trying API fetch for job ${jobId}...`)
+                    console.log(`Trying API fetch for job ${jobId}...`)
                     try {
                       const response = await fetch(`/api/ipfs/filebase/fetch?jobId=${jobId}`)
                       if (response.ok) {
@@ -278,7 +278,7 @@ export function CompletedJobs() {
                           if (foundCID) {
                             job.fullResCID = foundCID
                             localStorage.setItem(jobKey, JSON.stringify(job))
-                            console.log(`✅ Recovered fullResCID from API for job:`, jobId)
+                            console.log(`Recovered fullResCID from API for job:`, jobId)
                           }
                         }
                       }
@@ -295,23 +295,23 @@ export function CompletedJobs() {
               // Do NOT include jobs with only previewCID (which has watermark)
               if (job.fullResCID) {
                 jobs.push(job)
-                console.log(`✅ Added job ${jobId} to list (has fullResCID)`)
+                console.log(`Added job ${jobId} to list (has fullResCID)`)
               } else {
-                console.warn(`⚠️ Job ${jobId} has no fullResCID - skipping (will not show on dashboard)`)
+                console.warn(`Job ${jobId} has no fullResCID - skipping (will not show on dashboard)`)
                 if (job.previewCID) {
                   console.warn(`   Job ${jobId} has previewCID but no fullResCID - preview will NOT be shown`)
                 }
               }
             } catch (e) {
-              console.error(`❌ Error parsing job data for ${jobId}:`, e)
+              console.error(`Error parsing job data for ${jobId}:`, e)
             }
           } else {
-            console.warn(`⚠️ No job data found for key: ${jobKey}`)
+            console.warn(`No job data found for key: ${jobKey}`)
           }
         }
         
         // Also try to find jobs by searching all submission metadata
-        console.log('🔍 Searching all submission metadata for completed jobs...')
+        console.log('Searching all submission metadata for completed jobs...')
         const submissionJobsToCheck: { jobId: string; fullResCID: string; previewCID: string; worker: string }[] = []
         
         for (let i = 0; i < localStorage.length; i++) {
@@ -328,7 +328,7 @@ export function CompletedJobs() {
                 if (!jobs.find(j => j.jobId === jobId)) {
                   const worker = data.worker || ''
                   submissionJobsToCheck.push({ jobId, fullResCID: fullResCID || '', previewCID: previewCID || '', worker })
-                  console.log(`📋 Found submission with image for job ${jobId} in key: ${key}`, { 
+                  console.log(`Found submission with image for job ${jobId} in key: ${key}`, { 
                     fullResCID: !!fullResCID, 
                     previewCID: !!previewCID,
                     fullResCIDValue: fullResCID,
@@ -345,7 +345,7 @@ export function CompletedJobs() {
         // Check contract for these jobs to see if they're completed
         // Do this synchronously but update state after
         if (submissionJobsToCheck.length > 0 && publicClient) {
-          console.log(`🔍 Checking ${submissionJobsToCheck.length} jobs in contract...`)
+          console.log(`Checking ${submissionJobsToCheck.length} jobs in contract...`)
           
           // Process contract checks
           const checkJobs = async () => {
@@ -366,7 +366,7 @@ export function CompletedJobs() {
                 
                 // Check if this job is completed and owned by current user
                 if (creator.toLowerCase() === address.toLowerCase() && status === JobStatus.Completed) {
-                  console.log(`✅ Job ${subJob.jobId} is completed! Creating entry...`)
+                  console.log(`Job ${subJob.jobId} is completed! Creating entry...`)
                   
                   const completedJobKey = `completed_job_${subJob.jobId}_${address.toLowerCase()}`
                   const completedJobData: CompletedJob = {
@@ -396,7 +396,7 @@ export function CompletedJobs() {
                   // Add to jobs array
                   jobs.push(completedJobData)
                   newJobs.push(completedJobData)
-                  console.log(`💾 Created completed job entry for job ${subJob.jobId}`)
+                  console.log(`Created completed job entry for job ${subJob.jobId}`)
                 }
               } catch (err) {
                 console.warn(`Error checking job ${subJob.jobId} in contract:`, err)
@@ -463,7 +463,7 @@ export function CompletedJobs() {
   // Debug: Log what we found (must be before early returns)
   useEffect(() => {
     if (address && !loading) {
-      console.log('🔍 CompletedJobs Debug:', {
+      console.log('CompletedJobs Debug:', {
         address: address.toLowerCase(),
         foundJobs: completedJobs.length,
         jobs: completedJobs.map(j => ({
@@ -482,7 +482,7 @@ export function CompletedJobs() {
           allKeys.push(key)
         }
       }
-      console.log('📦 Relevant localStorage keys:', allKeys)
+      console.log('Relevant localStorage keys:', allKeys)
     }
   }, [address, loading, completedJobs])
 
@@ -502,7 +502,7 @@ export function CompletedJobs() {
     setRecovering(true)
     setLoading(true)
     try {
-      console.log('🔍 Recovering completed jobs from contract...')
+      console.log('Recovering completed jobs from contract...')
       
       const recoveredJobs: CompletedJob[] = []
       
@@ -513,7 +513,7 @@ export function CompletedJobs() {
         functionName: 'jobCount',
       }) as bigint
       
-      console.log(`📊 Total jobs in contract: ${jobCount.toString()}`)
+      console.log(`Total jobs in contract: ${jobCount.toString()}`)
       
       // Check each job to see if it's completed and owned by this address
       for (let i = 1; i <= Number(jobCount); i++) {
@@ -531,7 +531,7 @@ export function CompletedJobs() {
           
           // Check if this job is completed and owned by current user
           if (creator.toLowerCase() === address.toLowerCase() && status === JobStatus.Completed) {
-            console.log(`✅ Found completed job ${i} for creator ${address}`)
+            console.log(`Found completed job ${i} for creator ${address}`)
             
             const jobKey = `completed_job_${i}_${address.toLowerCase()}`
             let existing = localStorage.getItem(jobKey)
@@ -546,7 +546,7 @@ export function CompletedJobs() {
             ]
             
             // Also search all localStorage keys that might contain this job's metadata
-            console.log(`🔍 Searching for submission metadata for job ${i}...`)
+            console.log(`Searching for submission metadata for job ${i}...`)
             for (let j = 0; j < localStorage.length; j++) {
               const key = localStorage.key(j)
               if (key && key.includes(`submission_metadata`) && key.includes(`${i}`)) {
@@ -560,7 +560,7 @@ export function CompletedJobs() {
               if (data) {
                 try {
                   const submission = JSON.parse(data)
-                  console.log(`📦 Checking key ${key}:`, {
+                  console.log(`Checking key ${key}:`, {
                     hasFullRes: !!(submission.fullResCID || submission.metadata?.fullResCID),
                     hasPreview: !!(submission.previewCID || submission.metadata?.previewCID),
                     jobId: submission.jobId,
@@ -572,11 +572,11 @@ export function CompletedJobs() {
                   
                   if (foundFullRes) {
                     fullResCID = foundFullRes
-                    console.log(`✅ Found fullResCID in ${key}: ${fullResCID}`)
+                    console.log(`Found fullResCID in ${key}: ${fullResCID}`)
                   }
                   if (foundPreview) {
                     previewCID = foundPreview
-                    console.log(`✅ Found previewCID in ${key}: ${previewCID}`)
+                    console.log(`Found previewCID in ${key}: ${previewCID}`)
                   }
                   
                   if (fullResCID || previewCID) {
@@ -586,11 +586,11 @@ export function CompletedJobs() {
                   console.warn(`Error parsing submission data from ${key}:`, e)
                 }
               } else {
-                console.log(`⚠️ Key ${key} not found in localStorage`)
+                console.log(`Key ${key} not found in localStorage`)
               }
             }
             
-            console.log(`📊 Final CIDs for job ${i}:`, { fullResCID, previewCID })
+            console.log(`Final CIDs for job ${i}:`, { fullResCID, previewCID })
             
             // Create or update completed job entry
             const completedJobData: CompletedJob = existing ? JSON.parse(existing) : {
@@ -629,22 +629,22 @@ export function CompletedJobs() {
             // Do NOT add jobs with only previewCID (which has watermark)
             if (completedJobData.fullResCID) {
               recoveredJobs.push(completedJobData)
-              console.log(`💾 Created/updated completed job entry for job ${i} (has fullResCID)`, completedJobData)
+              console.log(`Created/updated completed job entry for job ${i} (has fullResCID)`, completedJobData)
             } else {
-              console.warn(`⚠️ Job ${i} is completed but has no fullResCID - skipping (will not show on dashboard)`)
+              console.warn(`Job ${i} is completed but has no fullResCID - skipping (will not show on dashboard)`)
               if (completedJobData.previewCID || previewCID) {
                 console.warn(`   Job ${i} has previewCID but no fullResCID - preview will NOT be shown`)
               }
             }
           } else {
-            console.log(`ℹ️ Job ${i}: creator=${creator.toLowerCase()}, user=${address.toLowerCase()}, status=${status} (${JobStatus[status]}), isCreator=${creator.toLowerCase() === address.toLowerCase()}, isCompleted=${status === JobStatus.Completed}`)
+            console.log(`Job ${i}: creator=${creator.toLowerCase()}, user=${address.toLowerCase()}, status=${status} (${JobStatus[status]}), isCreator=${creator.toLowerCase() === address.toLowerCase()}, isCompleted=${status === JobStatus.Completed}`)
           }
         } catch (err) {
           console.warn(`Error checking job ${i}:`, err)
         }
       }
       
-      console.log(`📊 Recovery complete. Found ${recoveredJobs.length} jobs with images`)
+      console.log(`Recovery complete. Found ${recoveredJobs.length} jobs with images`)
       
       // Update state with recovered jobs
       if (recoveredJobs.length > 0) {
@@ -660,7 +660,7 @@ export function CompletedJobs() {
           )
           return unique
         })
-        console.log(`✅ Recovered ${recoveredJobs.length} completed jobs`)
+        console.log(`Recovered ${recoveredJobs.length} completed jobs`)
       }
       
       setRecovering(false)
@@ -698,7 +698,7 @@ export function CompletedJobs() {
             // ALWAYS use full-res route - it NEVER processes/watermarks images
             const imageUrl = `/api/ipfs/filebase/image-fullres?cid=${encodeURIComponent(cleanCid)}&t=${Date.now()}`
             
-            console.log(`[CompletedJobs] ✅ Using FULL-RES route for job ${job.jobId}: ${imageUrl}`)
+            console.log(`[CompletedJobs] Using FULL-RES route for job ${job.jobId}: ${imageUrl}`)
             
             return (
               <div key={job.jobId} className="bg-gray-50 rounded-xl p-4 hover:shadow-lg transition-shadow">
