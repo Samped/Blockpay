@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useAccount, usePublicClient, useWalletClient, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
 import { parseEther } from 'viem'
 import { JOB_POOL_ABI, Job, JobStatus, cidToBytes32, parseTrustAmount, formatTrustAmount } from '@/lib/jobPoolContract'
@@ -13,15 +14,29 @@ export function useJobPool() {
   const { writeContract, data: hash, isPending: isWriting, error: writeError } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash })
 
-  // Read job count
-  const { data: jobCount } = useReadContract({
+  // Read job count with refetch capability
+  const { data: jobCount, refetch: refetchJobCount } = useReadContract({
     address: JOB_POOL_ADDRESS as `0x${string}`,
     abi: JOB_POOL_ABI,
     functionName: 'jobCount',
     query: {
       enabled: !!JOB_POOL_ADDRESS && JOB_POOL_ADDRESS !== '0x0000000000000000000000000000000000000000',
+      refetchInterval: false, // Don't auto-refetch, we'll do it manually
     },
   })
+
+  // Refetch jobCount when transaction is confirmed (for new jobs)
+  useEffect(() => {
+    if (isConfirmed && hash) {
+      // Wait a bit for the block to be indexed, then refetch
+      const timer = setTimeout(() => {
+        console.log('[useJobPool] Refetching jobCount after transaction confirmation')
+        refetchJobCount()
+      }, 2000) // 2 second delay to allow block indexing
+      
+      return () => clearTimeout(timer)
+    }
+  }, [isConfirmed, hash, refetchJobCount])
 
   /**
    * Create a job (payable - sends native token as escrow)
@@ -354,6 +369,25 @@ export function useJobPool() {
     try {
       console.log(`Fetching job ${jobId.toString()} from contract ${JOB_POOL_ADDRESS}`)
       
+      // First, check if jobAtomId exists - this is the most reliable indicator that a job exists
+      let jobAtomId: `0x${string}` | null = null
+      try {
+        jobAtomId = await publicClient.readContract({
+          address: JOB_POOL_ADDRESS as `0x${string}`,
+          abi: JOB_POOL_ABI,
+          functionName: 'jobAtomIds',
+          args: [jobId],
+        }) as `0x${string}`
+        
+        if (jobAtomId && jobAtomId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+          console.log(`Job ${jobId.toString()} atom ID found: ${jobAtomId}`)
+        } else {
+          console.warn(`Job ${jobId.toString()} atom ID is zero - job may not exist`)
+        }
+      } catch (atomErr) {
+        console.warn(`Could not check jobAtomId for job ${jobId.toString()}:`, atomErr)
+      }
+      
       // Try using the public jobs mapping first (more direct)
       let result: any
       try {
@@ -366,7 +400,7 @@ export function useJobPool() {
         console.log(`Job ${jobId.toString()} fetched via jobs mapping:`, result)
       } catch (err: any) {
         // If jobs mapping doesn't work, try getJob function
-        console.log('jobs mapping failed, trying getJob function:', err.message)
+        console.log(`jobs mapping failed, trying getJob function:`, err.message)
         try {
           result = await publicClient.readContract({
             address: JOB_POOL_ADDRESS as `0x${string}`,
@@ -377,69 +411,50 @@ export function useJobPool() {
           console.log(`Job ${jobId.toString()} fetched via getJob function:`, result)
         } catch (err2: any) {
           console.error(`Both methods failed for job ${jobId.toString()}:`, err2.message)
+          // If we have a jobAtomId, return minimal job instead of null
+          if (jobAtomId && jobAtomId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+            console.warn(`Job ${jobId.toString()} atom exists but struct failed to load - returning minimal job`)
+            const minimalJob: Job & { jobId: bigint; title?: string; description?: string } = {
+              jobId,
+              creator: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+              payment: 0n,
+              deadline: 0n,
+              status: 0 as JobStatus,
+              hasSubmission: false,
+              worker: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+              submissionHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+              title: `Job #${jobId.toString()} (Loading...)`,
+              description: 'Job data is being indexed. Please refresh in a moment.',
+            }
+            return minimalJob
+          }
           return null
         }
       }
 
       // Check if job exists (creator should not be zero address)
       if (!result || !result[0] || result[0] === '0x0000000000000000000000000000000000000000') {
-        console.warn(`Job ${jobId.toString()} does not exist (zero address creator)`)
-        console.warn(`   Result:`, result)
-        console.warn(`   Result[0]:`, result?.[0])
-        
-        // Diagnostic: Check if jobAtomId exists (might indicate partial creation)
-        try {
-          const atomId = await publicClient.readContract({
-            address: JOB_POOL_ADDRESS as `0x${string}`,
-            abi: JOB_POOL_ABI,
-            functionName: 'jobAtomIds',
-            args: [jobId],
-          }) as `0x${string}`
-          
-          if (atomId && atomId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-            console.warn(`   Job atom ID exists (${atomId}) but job struct is missing - possible contract state inconsistency`)
-          } else {
-            console.warn(`   Job atom ID is also zero - job was never created`)
+        // If jobAtomId exists but struct is missing, return a minimal job object
+        if (jobAtomId && jobAtomId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+          console.warn(`Job ${jobId.toString()} atom exists but struct is missing - returning minimal job object`)
+          // Return a minimal job with default values
+          const minimalJob: Job & { jobId: bigint; title?: string; description?: string } = {
+            jobId,
+            creator: '0x0000000000000000000000000000000000000000' as `0x${string}`, // Will be filtered or shown as "Loading..."
+            payment: 0n,
+            deadline: 0n,
+            status: 0 as JobStatus, // Active
+            hasSubmission: false,
+            worker: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+            submissionHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+            title: `Job #${jobId.toString()} (Loading...)`,
+            description: 'Job data is being indexed. Please refresh in a moment.',
           }
-        } catch (atomErr) {
-          console.warn(`   Could not check jobAtomId:`, atomErr)
+          return minimalJob
         }
         
-        // Don't return null immediately - wait a bit and retry in case it's still being indexed
-        // Try multiple times with increasing delays
-        const maxRetries = 3
-        let retrySuccess = false
-        
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-          const delay = Math.min(2000 * Math.pow(2, attempt), 10000) // 2s, 4s, 8s (max 10s)
-          console.log(`   Retrying job ${jobId.toString()} after ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`)
-          await new Promise(resolve => setTimeout(resolve, delay))
-          
-          try {
-            result = await publicClient.readContract({
-              address: JOB_POOL_ADDRESS as `0x${string}`,
-              abi: JOB_POOL_ABI,
-              functionName: 'jobs',
-              args: [jobId],
-            })
-            console.log(`Job ${jobId.toString()} retry ${attempt + 1} result:`, result)
-            
-            if (result && result[0] && result[0] !== '0x0000000000000000000000000000000000000000') {
-              retrySuccess = true
-              console.log(`Job ${jobId.toString()} found after retry ${attempt + 1}`)
-              break
-            }
-          } catch (retryErr) {
-            console.error(`Job ${jobId.toString()} retry ${attempt + 1} failed:`, retryErr)
-          }
-        }
-        
-        if (!retrySuccess) {
-          console.error(`Job ${jobId.toString()} still does not exist after ${maxRetries} retries`)
-          console.error(`   This job may have been cancelled, expired, or never successfully created.`)
-          console.error(`   Check the contract directly or verify the transaction hash if you created this job.`)
-          return null
-        }
+        console.warn(`Job ${jobId.toString()} does not exist (zero address creator and no atom ID)`)
+        return null
       }
 
       // Result is a tuple: [creator, payment, deadline, status, hasSubmission, worker, submissionHash]
@@ -764,6 +779,8 @@ export function useJobPool() {
     hash,
     writeError,
     jobCount,
+    refetchJobCount,
+    publicClient,
     
     // Functions
     createJob,
