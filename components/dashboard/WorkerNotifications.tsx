@@ -34,7 +34,7 @@ export function WorkerNotifications() {
     // Scan for payment atoms and create notifications
     const scanPaymentAtoms = async (): Promise<boolean> => {
       try {
-        console.log('🔍 Scanning for payment atoms for worker:', address.toLowerCase())
+        console.log('Scanning for payment atoms for worker:', address.toLowerCase())
         
         // Try multiple query strategies
         // Strategy 1: Query all JsonObject atoms (broader search)
@@ -68,12 +68,12 @@ export function WorkerNotifications() {
         const result = await response.json()
         
         if (result.errors) {
-          console.error('❌ GraphQL errors:', result.errors)
+          console.error('GraphQL errors:', result.errors)
           return false
         }
         
         const allAtoms = result.data?.atoms || []
-        console.log(`📦 Found ${allAtoms.length} JsonObject atoms, filtering for payments...`)
+        console.log(`Found ${allAtoms.length} JsonObject atoms, filtering for payments...`)
         
         // Filter for payment atoms where worker matches
         const paymentAtoms = allAtoms.filter((atom: any) => {
@@ -96,7 +96,7 @@ export function WorkerNotifications() {
             const workerMatch = atomData.worker?.toLowerCase() === address.toLowerCase()
             
             if (isPayment) {
-              console.log(`💰 Found payment atom ${atom.term_id}:`, {
+              console.log(`Found payment atom ${atom.term_id}:`, {
                 worker: atomData.worker,
                 workerMatch,
                 jobId: atomData.jobId,
@@ -111,7 +111,7 @@ export function WorkerNotifications() {
           }
         })
 
-        console.log(`✅ Found ${paymentAtoms.length} payment atoms for this worker`)
+        console.log(`Found ${paymentAtoms.length} payment atoms for this worker`)
 
         const workerNotificationsKey = `worker_notifications_${address.toLowerCase()}`
         const existingNotifications = JSON.parse(localStorage.getItem(workerNotificationsKey) || '[]')
@@ -127,7 +127,7 @@ export function WorkerNotifications() {
               atomData = atom.data
             }
 
-            console.log(`🔍 Processing atom ${atom.term_id}:`, {
+            console.log(`Processing atom ${atom.term_id}:`, {
               type: atomData.type,
               worker: atomData.worker,
               jobId: atomData.jobId,
@@ -150,7 +150,7 @@ export function WorkerNotifications() {
               )
 
               if (!existingNotification) {
-                console.log(`✅ Creating notification from payment atom for job ${jobId}`, {
+                console.log(`Creating notification from payment atom for job ${jobId}`, {
                   atomId: atom.term_id,
                   jobId,
                   workerPayment,
@@ -172,12 +172,12 @@ export function WorkerNotifications() {
 
                 existingNotifications.unshift(notification)
                 hasNewNotifications = true
-                console.log(`💾 Added notification for job ${jobId}`)
+                console.log(`Added notification for job ${jobId}`)
               } else {
-                console.log(`⚠️ Notification already exists for job ${jobId} or atom ${atom.term_id}`)
+                console.log(`Notification already exists for job ${jobId} or atom ${atom.term_id}`)
               }
             } else {
-              console.log(`⚠️ Atom ${atom.term_id} doesn't match payment criteria:`, {
+              console.log(`Atom ${atom.term_id} doesn't match payment criteria:`, {
                 isPayment: atomData.type === 'payment',
                 workerMatch: atomData.worker?.toLowerCase() === address.toLowerCase(),
                 hasPayment: !!atomData.workerPayment
@@ -192,7 +192,7 @@ export function WorkerNotifications() {
           // Keep only last 50 notifications
           const recentNotifications = existingNotifications.slice(0, 50)
           localStorage.setItem(workerNotificationsKey, JSON.stringify(recentNotifications))
-          console.log('💾 Updated notifications from payment atoms, total:', recentNotifications.length)
+          console.log('Updated notifications from payment atoms, total:', recentNotifications.length)
           
           // Trigger storage event
           window.dispatchEvent(new StorageEvent('storage', {
