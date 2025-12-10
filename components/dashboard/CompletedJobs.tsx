@@ -672,22 +672,58 @@ export function CompletedJobs() {
     }
   }
 
-  // Don't show anything if there are no completed jobs - recovery happens automatically in background
-  if (completedJobs.length === 0) {
-    return null
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl shadow-card p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-gray-900">Completed Jobs</h2>
+        </div>
+        <div className="text-center py-8">
+          <div className="animate-pulse text-gray-400">Loading completed jobs...</div>
+        </div>
+      </div>
+    )
   }
+
+  // Filter jobs with fullResCID
+  const jobsWithImages = completedJobs.filter((job) => job.fullResCID)
 
   return (
     <div className="bg-white rounded-2xl shadow-card p-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-900">Completed Jobs</h2>
-        <span className="text-sm text-gray-500">{completedJobs.length} {completedJobs.length === 1 ? 'job' : 'jobs'}</span>
+        {jobsWithImages.length > 0 && (
+          <span className="text-sm text-gray-500">{jobsWithImages.length} {jobsWithImages.length === 1 ? 'job' : 'jobs'}</span>
+        )}
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {completedJobs
-          .filter((job) => job.fullResCID) // ONLY show jobs with fullResCID (no watermark)
-          .map((job) => {
+      {jobsWithImages.length === 0 ? (
+        <div className="text-center py-12">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
+            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <p className="text-gray-600 mb-2 font-medium">No completed jobs yet</p>
+          <p className="text-sm text-gray-500 mb-4">
+            {recovering ? 'Recovering jobs from contract...' : 'Completed jobs will appear here once you finish and pay for work.'}
+          </p>
+          {!recovering && (
+            <button
+              onClick={recoverFromContract}
+              className="inline-flex items-center px-4 py-2 bg-primary text-white rounded-lg hover:bg-[#0052CC] transition-colors text-sm font-medium"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Recover from Contract
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {jobsWithImages.map((job) => {
             // ONLY use fullResCID - never show previewCID (which has watermark)
             const imageCid = job.fullResCID
             const isFullRes = true // Always true since we filtered for fullResCID
@@ -744,8 +780,9 @@ export function CompletedJobs() {
             </div>
           </div>
           )
-        })}
-      </div>
+          })}
+        </div>
+      )}
 
       {/* Image Modal */}
       {selectedImage && (
