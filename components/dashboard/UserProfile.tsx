@@ -5,7 +5,7 @@ import { usePublicClient, useWriteContract, useWaitForTransactionReceipt, useAcc
 import { parseEther, decodeErrorResult, formatUnits } from 'viem'
 import { intuitionClient, Atom, TrustScore, Triple } from '@/lib/intuitionClient'
 import { INTUITION_CONTRACT_ABI, INTUITION_CONTRACT_ADDRESS, atomDataToBytes } from '@/lib/intuitionContract'
-import { CompletedJobs } from './CompletedJobs'
+import { JOB_POOL_ADDRESS, JOB_POOL_ABI, JobStatus } from '@/lib/jobPoolContract'
 import { WorkerNotifications } from './WorkerNotifications'
 
 interface UserProfileProps {
@@ -49,14 +49,82 @@ export function UserProfile({ address }: UserProfileProps) {
   const [loading, setLoading] = useState(true)
   const [walletBalance, setWalletBalance] = useState<string | null>(null)
   
-  // Count completed jobs from localStorage
+  // Count completed jobs from localStorage (more robust)
   const countCompletedJobsFromStorage = () => {
     if (!address) return 0
     try {
-      const creatorCompletedJobsKey = `creator_completed_jobs_${address.toLowerCase()}`
+      const addressLower = address.toLowerCase()
+      const creatorCompletedJobsKey = `creator_completed_jobs_${addressLower}`
+      
+      // First, try to get from the list
       const jobIds = JSON.parse(localStorage.getItem(creatorCompletedJobsKey) || '[]')
-      return jobIds.length
+      let count = Array.isArray(jobIds) ? jobIds.length : 0
+      
+      // Also check all completed_job keys as a fallback
+      let foundKeys = 0
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && key.startsWith(`completed_job_`) && key.includes(addressLower)) {
+          foundKeys++
+        }
+      }
+      
+      // Use the maximum of both methods
+      const finalCount = Math.max(count, foundKeys)
+      
+      console.log('[CompletedJobs] Count from storage:', {
+        fromList: count,
+        fromKeys: foundKeys,
+        finalCount,
+        address: addressLower
+      })
+      
+      return finalCount
     } catch (err) {
+      console.error('[CompletedJobs] Error counting from storage:', err)
+      return 0
+    }
+  }
+
+  // Count completed jobs from contract (fallback)
+  const countCompletedJobsFromContract = async (): Promise<number> => {
+    if (!address || !publicClient) return 0
+    try {
+      const jobCount = await publicClient.readContract({
+        address: JOB_POOL_ADDRESS as `0x${string}`,
+        abi: JOB_POOL_ABI,
+        functionName: 'jobCount',
+      }) as bigint
+
+      let completedCount = 0
+      const totalJobs = Number(jobCount)
+      
+      // Check each job to see if it's completed and owned by this address
+      for (let i = 1; i <= totalJobs; i++) {
+        try {
+          const jobData = await publicClient.readContract({
+            address: JOB_POOL_ADDRESS as `0x${string}`,
+            abi: JOB_POOL_ABI,
+            functionName: 'jobs',
+            args: [BigInt(i)],
+          }) as any
+          
+          const creator = (jobData[0] as string).toLowerCase()
+          const status = jobData[3] as number
+          
+          if (creator === address.toLowerCase() && status === JobStatus.Completed) {
+            completedCount++
+          }
+        } catch (err) {
+          // Skip jobs that can't be read
+          continue
+        }
+      }
+      
+      console.log('[CompletedJobs] Count from contract:', completedCount)
+      return completedCount
+    } catch (err) {
+      console.error('[CompletedJobs] Error counting from contract:', err)
       return 0
     }
   }
@@ -109,7 +177,24 @@ export function UserProfile({ address }: UserProfileProps) {
         
         // Count completed jobs from localStorage (more accurate)
         const storageCompletedJobs = countCompletedJobsFromStorage()
-        const completedJobs = Math.max(apiCompletedJobs, storageCompletedJobs)
+        
+        // If no jobs in storage, try contract as fallback
+        let contractCompletedJobs = 0
+        if (storageCompletedJobs === 0 && publicClient) {
+          contractCompletedJobs = await countCompletedJobsFromContract()
+        }
+        
+        // Prioritize localStorage count, then contract, then API
+        const completedJobs = storageCompletedJobs > 0 
+          ? storageCompletedJobs 
+          : (contractCompletedJobs > 0 ? contractCompletedJobs : apiCompletedJobs)
+        
+        console.log('[CompletedJobs] Final count:', {
+          storageCount: storageCompletedJobs,
+          contractCount: contractCompletedJobs,
+          apiCount: apiCompletedJobs,
+          finalCount: completedJobs
+        })
 
         if (userAtom) {
           // Also check atom.data directly as a fallback if atomData is empty
@@ -1040,11 +1125,6 @@ export function UserProfile({ address }: UserProfileProps) {
       {/* Worker Notifications Section */}
       <div className="mt-8">
         <WorkerNotifications />
-      </div>
-
-      {/* Completed Jobs Section */}
-      <div className="mt-8">
-        <CompletedJobs />
       </div>
     </div>
     </>
