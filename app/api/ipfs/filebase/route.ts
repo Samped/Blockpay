@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
           quality: isSubmissionPreview
             ? (Number(process.env.IMAGE_QUALITY) || 15) // Much lower quality for previews (15% instead of 30%)
             : (Number(process.env.IMAGE_QUALITY) || 80),
-          watermarkText: process.env.WATERMARK_TEXT || 'Blockpay – preview',
+          watermarkText: process.env.WATERMARK_TEXT || 'Blockpay - preview',
           watermarkOpacity: isSubmissionPreview
             ? (Number(process.env.WATERMARK_OPACITY) || 0.8) // More visible watermark for previews (80% opacity)
             : (Number(process.env.WATERMARK_OPACITY) || 0.6),
@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
         
         finalBuffer = await compressAndWatermark(buffer, opts)
         
-        console.log(`[Upload] [SUCCESS] Image processed: ${buffer.length} bytes → ${finalBuffer.length} bytes`)
+        console.log(`[Upload] [SUCCESS] Image processed: ${buffer.length} bytes -> ${finalBuffer.length} bytes`)
       }
     }
 
