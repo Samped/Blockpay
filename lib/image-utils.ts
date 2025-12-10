@@ -18,7 +18,7 @@ export async function compressAndWatermark(
     maxWidth = 600, // Much lower for previews to prevent stealing
     maxHeight = 600, // Much lower for previews to prevent stealing
     quality = 15, // Much lower quality for previews (15% instead of 30%)
-    watermarkText = 'Blockpay – preview',
+    watermarkText = 'Blockpay - preview',
     watermarkOpacity = 0.8, // Higher opacity for better theft prevention
   } = opts
 
@@ -28,7 +28,7 @@ export async function compressAndWatermark(
   const originalHeight = meta.height ?? maxHeight
   const originalSize = standardBuffer.length
 
-  console.log(`[Image] 📥 Original: ${originalWidth}x${originalHeight}, ${(originalSize / 1024).toFixed(1)}KB, Target max: ${maxWidth}x${maxHeight}, Quality: ${quality}`)
+  console.log(`[Image] Original: ${originalWidth}x${originalHeight}, ${(originalSize / 1024).toFixed(1)}KB, Target max: ${maxWidth}x${maxHeight}, Quality: ${quality}`)
 
   // Step 1: Resize the image to max dimensions (reduces quality)
   // Force resize to exactly maxWidth x maxHeight to ensure quality reduction
@@ -49,7 +49,7 @@ export async function compressAndWatermark(
   
   const pixelReduction = ((1 - (baseWidth * baseHeight) / (originalWidth * originalHeight)) * 100).toFixed(1)
   console.log(`[Image] [SUCCESS] Resized to: ${baseWidth}x${baseHeight} (reduced by ${pixelReduction}% pixels)`)
-  console.log(`[Image] [STATS] Size: ${originalWidth}x${originalHeight} → ${baseWidth}x${baseHeight}`)
+  console.log(`[Image] [STATS] Size: ${originalWidth}x${originalHeight} -> ${baseWidth}x${baseHeight}`)
   
   // Use the resized image
   image = resizedSharp
@@ -148,8 +148,8 @@ export async function compressAndWatermark(
   const finalMeta = await sharp(final).metadata()
   const sizeReduction = ((1 - final.length / originalSize) * 100).toFixed(1)
   console.log(`[Watermark] [SUCCESS] Final image: ${finalMeta.width}x${finalMeta.height}, ${(final.length / 1024).toFixed(1)}KB, format: ${finalMeta.format}, quality: ${quality}`)
-  console.log(`[Watermark] [SUCCESS] Size reduction: ${(originalSize / 1024).toFixed(1)}KB → ${(final.length / 1024).toFixed(1)}KB (${sizeReduction}% smaller)`)
-  console.log(`[Watermark] [SUCCESS] Dimensions: ${originalWidth}x${originalHeight} → ${finalMeta.width}x${finalMeta.height}`)
+  console.log(`[Watermark] [SUCCESS] Size reduction: ${(originalSize / 1024).toFixed(1)}KB -> ${(final.length / 1024).toFixed(1)}KB (${sizeReduction}% smaller)`)
+  console.log(`[Watermark] [SUCCESS] Dimensions: ${originalWidth}x${originalHeight} -> ${finalMeta.width}x${finalMeta.height}`)
   console.log(`[Watermark] [SUCCESS] Created ${watermarkTexts.length} watermark instances across the image`)
 
   return final
