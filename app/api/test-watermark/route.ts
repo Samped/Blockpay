@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
       maxWidth: 1200,
       maxHeight: 1200,
       quality: 55,
-      watermarkText: 'Blockpay – preview',
+      watermarkText: 'Blockpay - preview',
       watermarkOpacity: 0.6,
     })
     
