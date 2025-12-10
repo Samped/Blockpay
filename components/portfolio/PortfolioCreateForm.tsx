@@ -368,7 +368,7 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
               const portfolio = await fetchPortfolioByProfileId(profileId)
               
               if (portfolio) {
-                setIndexingStatus('✅ Portfolio indexed and available!')
+                setIndexingStatus('Portfolio indexed and available!')
                 setSuccess(true)
                 if (onSuccess) {
                   onSuccess({ profileId, txHash })
@@ -381,33 +381,33 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
             }
             
             // Even if not indexed yet, show success
-            setIndexingStatus('⚠️ Portfolio created but may take a few moments to appear. Refreshing page...')
+            setIndexingStatus('Portfolio created but may take a few moments to appear. Refreshing hub...')
             setSuccess(true)
             if (onSuccess) {
               onSuccess({ profileId, txHash })
             }
           } else {
             // No profileId extracted, but transaction succeeded
-            setIndexingStatus('✅ Transaction confirmed! Redirecting to portfolio page...')
+            setIndexingStatus('Transaction confirmed! Redirecting to hub...')
             setSuccess(true)
             if (onSuccess) {
               onSuccess({ profileId: '', txHash })
             }
             // Redirect to portfolio page
             setTimeout(() => {
-              router.push('/portfolio')
+              router.push('/hub')
             }, 2000)
           }
         } catch (error) {
           console.error('[ERROR] Error waiting for indexing:', error)
-          setIndexingStatus('Transaction confirmed. Redirecting to portfolio page...')
+          setIndexingStatus('Transaction confirmed. Redirecting to hub...')
           setSuccess(true)
           if (onSuccess) {
             onSuccess({ profileId: '', txHash })
           }
           // Redirect to portfolio page
           setTimeout(() => {
-            router.push('/portfolio')
+            router.push('/hub')
           }, 2000)
         }
       }
@@ -447,7 +447,7 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
 
       {isPaused && (
         <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <p className="text-sm text-yellow-800">⚠️ Portfolio creation is currently paused</p>
+          <p className="text-sm text-yellow-800">Portfolio creation is currently paused</p>
         </div>
       )}
 
@@ -456,7 +456,7 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
       {success && (
         <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
           <p className="text-sm text-green-800 font-medium mb-2">
-            ✅ Portfolio creation transaction confirmed!
+            Portfolio creation transaction confirmed!
           </p>
           {txHash && (
             <p className="text-xs text-green-700 mb-2">
