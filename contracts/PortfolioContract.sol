@@ -207,7 +207,7 @@ contract PortfolioContract {
         // Calculate total triples: skills + tags + socials + achievements
         uint256 totalTriples = skills.length + tags.length + socials.length + achievements.length;
         
-        // Total fee = (atoms × ATOM_CREATION_FEE) + (triples × ATOM_CREATION_FEE)
+        // Total fee = (atoms x ATOM_CREATION_FEE) + (triples x ATOM_CREATION_FEE)
         // SECURITY: Check for potential overflow (defensive)
         require(totalAtoms + totalTriples <= type(uint256).max / ATOM_CREATION_FEE, "Fee calculation overflow");
         uint256 totalFee = (totalAtoms + totalTriples) * ATOM_CREATION_FEE;
@@ -330,7 +330,7 @@ contract PortfolioContract {
             uint256[] memory tripleAssets = new uint256[](totalTriples);
             uint256 tripleCounter = 0;
             
-            // Skill triples: profileId → skillPredicate → skillValue
+            // Skill triples: profileId -> skillPredicate -> skillValue
             for (uint256 i = 0; i < skills.length; i++) {
                 tripleSubjects[tripleCounter] = profileId;
                 triplePredicates[tripleCounter] = predicateIds[PREDICATE_SKILL];
