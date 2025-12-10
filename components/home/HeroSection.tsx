@@ -42,10 +42,10 @@ export function HeroSection() {
                   Explore Job Pool
                 </Link>
                 <Link
-                  href="/portfolio"
+                  href="/hub"
                   className="px-8 py-4 text-base font-semibold rounded-full border-2 border-gray-300 text-gray-900 hover:border-gray-400 hover:bg-gray-50 transition-all duration-200"
                 >
-                  Create Portfolio
+                  Open Hub
                 </Link>
               </>
             ) : (
