@@ -409,7 +409,7 @@ export function PortfolioDetail({ profileId, onBack }: PortfolioDetailProps) {
                   
                   return (
                     <div key={index} className="flex items-start gap-3">
-                      <span className="text-primary mt-1">•</span>
+                      <span className="text-primary mt-1">-</span>
                       <div className="flex-1">
                         <p className="text-gray-900">{achievementText}</p>
                         {achievementLink && (
@@ -466,7 +466,7 @@ export function PortfolioDetail({ profileId, onBack }: PortfolioDetailProps) {
                               rel="noopener noreferrer"
                               className="text-sm text-primary hover:underline"
                             >
-                              View project →
+                              View project
                             </a>
                           )}
                         </div>
@@ -506,7 +506,7 @@ export function PortfolioDetail({ profileId, onBack }: PortfolioDetailProps) {
                           onClick={() => window.open(imageUrl, '_blank')}
                         />
                         <p className="text-xs text-green-600 mt-2 text-center">
-                          ✓ High resolution
+                          High resolution
                         </p>
                       </div>
                       <div className="space-y-2">
