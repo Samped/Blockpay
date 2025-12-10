@@ -152,7 +152,7 @@ export function UserProfile({ address }: UserProfileProps) {
       try {
         setLoading(true)
         console.log('[INFO] Fetching user profile for address:', address)
-        console.log('📡 Public client available:', !!publicClient)
+        console.log('[INFO] Public client available:', !!publicClient)
 
         // Fetch user profile using GraphQL API, passing publicClient to check contract
         const profileData = await intuitionClient.getUserProfileData(address, publicClient || undefined)
@@ -693,7 +693,7 @@ export function UserProfile({ address }: UserProfileProps) {
                   }}
                   className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors mr-2"
                 >
-                  🔄 Retry Search
+                  Retry Search
                 </button>
                 <button
                   onClick={() => {
