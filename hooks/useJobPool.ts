@@ -204,7 +204,7 @@ export function useJobPool() {
         } else if (simError.message?.includes('Deadline passed')) {
           errorMessage = 'Job deadline has passed'
         } else if (simError.message?.includes('Send 2 * atomCreationFee')) {
-          errorMessage = `Insufficient funds. Required: ${formatTrustAmount(requiredValue)} TRUST (2 × 0.1 TRUST atom creation fee)`
+          errorMessage = `Insufficient funds. Required: ${formatTrustAmount(requiredValue)} TRUST (2 x 0.1 TRUST atom creation fee)`
         } else if (simError.message?.includes('Submission atom creation failed')) {
           errorMessage = 'Failed to create submission atom. This might be due to insufficient deposit amount or MultiVault requirements. Please check that you have enough funds and try again.'
         } else if (simError.message?.includes('createAtoms failed')) {
@@ -277,7 +277,7 @@ export function useJobPool() {
         let errorMessage = simError.message || 'Transaction would revert'
         
         if (simError.message?.includes('Send 2 * atomCreationFee')) {
-          errorMessage = `Insufficient funds. Required: ${formatTrustAmount(requiredValue)} TRUST (2 × 0.1 TRUST atom creation fee)`
+          errorMessage = `Insufficient funds. Required: ${formatTrustAmount(requiredValue)} TRUST (2 x 0.1 TRUST atom creation fee)`
         } else if (simError.message?.includes('Accept too soon')) {
           errorMessage = 'You must wait at least 1 hour after a submission is made before you can accept it. This is a security feature to protect submitters from front-running attacks. Please wait and try again later.'
         } else if (simError.message?.includes('Already accepted')) {
