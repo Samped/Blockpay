@@ -62,7 +62,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
         return null
       }
       atom = atoms[0]
-      console.log('[INFO] ✅ Found atom in GraphQL:', atom.term_id)
+      console.log('[INFO] Found atom in GraphQL:', atom.term_id)
     }
     
     if (!atom) {
@@ -228,7 +228,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
           return tripleSubject === subjectId
         })
         
-        console.log('[INFO] ✅ Filtered to', triples.length, 'triples for profile', profileId.slice(0, 20))
+        console.log('[INFO] Filtered to', triples.length, 'triples for profile', profileId.slice(0, 20))
         if (triples.length > 0) {
           console.log('[INFO] Sample triple:', {
             id: triples[0].id,
@@ -294,7 +294,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
           
           console.log('[INFO] Filtered to', triples.length, 'triples for profile', profileId.slice(0, 20))
           if (triples.length > 0) {
-            console.log('[INFO] ✅ Fallback query found triples!')
+            console.log('[INFO] Fallback query found triples!')
           }
         }
       } catch (fallbackError) {
@@ -325,7 +325,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
         projects: [],
         createdAt: atom.created_at,
       }
-      console.log('[INFO] ✅ Returning portfolio (no triples):', {
+      console.log('[INFO] Returning portfolio (no triples):', {
         profileId: portfolio.profileId,
         hasProfileData: !!portfolio.profileData,
         profileDataKeys: portfolio.profileData ? Object.keys(portfolio.profileData) : [],
@@ -361,7 +361,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
         projects: [],
         createdAt: atom.created_at,
       }
-      console.log('[INFO] ✅ Returning portfolio (no object IDs):', {
+      console.log('[INFO] Returning portfolio (no object IDs):', {
         profileId: portfolio.profileId,
         hasProfileData: !!portfolio.profileData,
         name: portfolio.profileData?.name,
@@ -512,7 +512,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
         }
         if (typeof skillValue === 'string') {
           skills.push(skillValue)
-          console.log('[INFO] ✅ Added skill:', skillValue)
+          console.log('[INFO] Added skill:', skillValue)
         } else {
           console.log('[DEBUG] Skill value is not a string:', typeof skillValue, skillValue, 'Full data:', objectAtom.data)
         }
@@ -524,7 +524,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
         }
         if (typeof tagValue === 'string') {
           tags.push(tagValue)
-          console.log('[INFO] ✅ Added tag:', tagValue)
+          console.log('[INFO] Added tag:', tagValue)
         } else {
           console.log('[DEBUG] Tag value is not a string:', typeof tagValue, tagValue, 'Full data:', objectAtom.data)
         }
@@ -538,13 +538,13 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
         // Handle both object and string formats
         if (typeof socialData === 'object' && socialData.platform && socialData.url) {
           socials.push({ platform: socialData.platform, url: socialData.url })
-          console.log('[INFO] ✅ Added social:', socialData.platform)
+          console.log('[INFO] Added social:', socialData.platform)
         } else if (typeof socialData === 'string') {
           try {
             const parsed = JSON.parse(socialData)
             if (parsed.platform && parsed.url) {
               socials.push({ platform: parsed.platform, url: parsed.url })
-              console.log('[INFO] ✅ Added social (parsed):', parsed.platform)
+              console.log('[INFO] Added social (parsed):', parsed.platform)
             }
           } catch {
             console.log('[DEBUG] Failed to parse social data:', socialData)
@@ -560,7 +560,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
         }
         if (typeof achievementValue === 'string') {
           achievements.push(achievementValue)
-          console.log('[INFO] ✅ Added achievement:', achievementValue.slice(0, 50))
+          console.log('[INFO] Added achievement:', achievementValue.slice(0, 50))
         } else {
           console.log('[DEBUG] Achievement value is not a string:', typeof achievementValue, achievementValue, 'Full data:', objectAtom.data)
         }
@@ -578,7 +578,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
             image: projectData.image,
             externalLink: projectData.externalLink,
           })
-          console.log('[INFO] ✅ Added project:', projectData.title)
+          console.log('[INFO] Added project:', projectData.title)
         } else {
           console.log('[DEBUG] Project data format unexpected:', typeof projectData, projectData, 'Full data:', objectAtom.data)
         }
@@ -781,7 +781,7 @@ export async function fetchAllPortfolios(limit: number = 50): Promise<Portfolio[
     }
     
     if (allAtoms.length === 0) {
-      console.log('[WARN] ⚠️ No atoms returned from GraphQL query!')
+      console.log('[WARN] No atoms returned from GraphQL query!')
       console.log('[WARN] Query variables:', variables)
       console.log('[WARN] Contract address used:', contractAddress || 'NONE (fallback mode)')
     }
@@ -801,7 +801,7 @@ export async function fetchAllPortfolios(limit: number = 50): Promise<Portfolio[
         // Check for profile type - contract creates: {"type":"profile","data":{...}}
         const isProfile = data.type === 'profile'
         if (isProfile) {
-          console.log('[INFO] ✅ Found profile atom:', atom.term_id.slice(0, 20) + '...', 'creator:', atom.creator_id?.slice(0, 10) + '...')
+          console.log('[INFO] Found profile atom:', atom.term_id.slice(0, 20) + '...', 'creator:', atom.creator_id?.slice(0, 10) + '...')
         }
         return isProfile
       } catch (error) {
@@ -819,17 +819,17 @@ export async function fetchAllPortfolios(limit: number = 50): Promise<Portfolio[
     
     for (const atom of profileAtoms) {
       if (atom.term_id) {
-        console.log('[INFO] 🔄 Processing profile atom:', atom.term_id.slice(0, 20) + '...')
+        console.log('[INFO] Processing profile atom:', atom.term_id.slice(0, 20) + '...')
         try {
           const portfolio = await fetchPortfolioByProfileId(atom.term_id, atom)
           if (portfolio) {
-            console.log('[SUCCESS] ✅ Portfolio loaded:', portfolio.profileId.slice(0, 20) + '...')
+            console.log('[SUCCESS] Portfolio loaded:', portfolio.profileId.slice(0, 20) + '...')
             portfolios.push(portfolio)
           } else {
-            console.log('[WARN] ⚠️ fetchPortfolioByProfileId returned null')
+            console.log('[WARN] fetchPortfolioByProfileId returned null')
           }
         } catch (error) {
-          console.error('[ERROR] ❌ Exception:', error)
+          console.error('[ERROR] Exception:', error)
           if (error instanceof Error) {
             console.error('[ERROR] Error message:', error.message)
           }

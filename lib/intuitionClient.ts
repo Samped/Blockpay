@@ -252,7 +252,7 @@ export class IntuitionClient {
     url?: string
   }): Promise<string | null> {
     try {
-      console.log('📌 Uploading thing metadata to IPFS via pinThing...')
+      console.log('Uploading thing metadata to IPFS via pinThing...')
       
       const mutation = `
         mutation PinThing(
@@ -317,7 +317,7 @@ export class IntuitionClient {
       let ipfsUri: string | null = null
       
       try {
-        console.log('📌 Step 1: Uploading metadata to IPFS via pinThing...')
+        console.log('Step 1: Uploading metadata to IPFS via pinThing...')
         ipfsUri = await this.pinThing({
           name: thingName,
           description: thingDescription,
@@ -332,7 +332,7 @@ export class IntuitionClient {
       // If pinThing failed, try uploading to our own IPFS service
       if (!ipfsUri) {
         try {
-          console.log('📌 Step 1 (fallback): Uploading to our IPFS service...')
+          console.log('Step 1 (fallback): Uploading to our IPFS service...')
           const { uploadToIPFS } = await import('./ipfs')
           const uploadResult = await uploadToIPFS(data)
           ipfsUri = `ipfs://${uploadResult.cid}`
@@ -409,7 +409,7 @@ export class IntuitionClient {
     objectId: string
   ): Promise<Triple | null> {
     try {
-      console.log('🔗 Creating triple...')
+      console.log('Creating triple...')
       console.log(`   Subject: ${subjectId}`)
       console.log(`   Predicate: ${predicateId}`)
       console.log(`   Object: ${objectId}`)
@@ -650,7 +650,7 @@ export class IntuitionClient {
     try {
       const addr = walletAddress.toLowerCase()
       console.log('[INFO] getUserProfileByAddress called for:', addr)
-      console.log('📡 GraphQL URL:', this.graphqlUrl)
+      console.log('GraphQL URL:', this.graphqlUrl)
 
       // First, try to check contract for atom IDs if publicClient is available
       let contractAtomIds: string[] = []
@@ -690,7 +690,7 @@ export class IntuitionClient {
 
       // Strategy 1: Query by creator_id (most reliable for on-chain created atoms)
       // Note: We fetch more atoms and filter client-side because creator_id might be checksummed (mixed case)
-      console.log('📡 Strategy 1: Querying by creator_id (case-insensitive)...')
+      console.log('Strategy 1: Querying by creator_id (case-insensitive)...')
       try {
         // First try exact match (in case it's already lowercase)
         const query1 = `
@@ -853,7 +853,7 @@ export class IntuitionClient {
       }
 
       // Strategy 2: Query by type=User (simplified - data field filtering is complex in GraphQL)
-      console.log('📡 Strategy 2: Querying by type=User...')
+      console.log('Strategy 2: Querying by type=User...')
       try {
         const query2 = `
           query GetUserProfileByType($address: String!) {
@@ -912,7 +912,7 @@ export class IntuitionClient {
 
       // Strategy 3: Query ALL atoms by creator_id (no type filter) and filter client-side
       // Use case-insensitive search since creator_id might be checksummed
-      console.log('📡 Strategy 3: Querying ALL atoms by creator_id (case-insensitive)...')
+      console.log('Strategy 3: Querying ALL atoms by creator_id (case-insensitive)...')
       try {
         // Try exact match first
         const query3 = `
@@ -1130,7 +1130,7 @@ export class IntuitionClient {
       }
 
       // Strategy 4: Try REST API to get all User atoms and filter
-      console.log('📡 Strategy 4: Trying REST API fallback...')
+      console.log('Strategy 4: Trying REST API fallback...')
       try {
         const response = await fetch(`${this.graphUrl}/atoms?type=User&limit=100`)
         if (response.ok) {
@@ -1162,7 +1162,7 @@ export class IntuitionClient {
       }
 
       // Strategy 5: Diagnostic - Query recent atoms and filter by creator_id
-      console.log('📡 Strategy 5: Running diagnostic query...')
+      console.log('Strategy 5: Running diagnostic query...')
       try {
         const diagnosticQuery = `
           query DiagnosticQuery {
@@ -1266,7 +1266,7 @@ export class IntuitionClient {
       // GraphQL API only has pinOrganization, pinPerson, pinThing mutations
       // No direct atom creation mutations - must use REST API
       console.log('[INFO] GraphQL API is read-only for atom creation')
-      console.log('→ Using REST API via Next.js proxy route to create atom...')
+      console.log('Using REST API via Next.js proxy route to create atom...')
       
       const atom = await this.createAtom('User', data)
       
