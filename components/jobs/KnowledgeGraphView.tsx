@@ -576,16 +576,16 @@ export function KnowledgeGraphView({ jobId }: { jobId: bigint }) {
         {graphData.triples.length > 0 && (
           <div className="border border-gray-200 rounded-lg p-4">
             <h4 className="font-semibold text-gray-900 mb-2 flex items-center">
-              <span className="mr-2">🔗</span> Relationships (Triples)
+              <span className="mr-2">Links:</span> Relationships (Triples)
             </h4>
             <div className="space-y-2">
               {graphData.triples.map((triple) => (
                 <div key={triple.id} className="text-sm bg-gray-50 p-2 rounded">
                   <div className="font-mono text-xs">
                     <span className="text-blue-600">{triple.subject.substring(0, 10)}...</span>
-                    {' → '}
+                    {' -> '}
                     <span className="text-purple-600">{triple.predicate}</span>
-                    {' → '}
+                    {' -> '}
                     <span className="text-green-600">{triple.object.substring(0, 10)}...</span>
                   </div>
                 </div>
