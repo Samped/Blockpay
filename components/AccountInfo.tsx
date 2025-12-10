@@ -180,7 +180,7 @@ export function AccountInfo({ accountInfo, onRefresh }: AccountInfoProps) {
                             <p className="truncate">{atomData.bio}</p>
                           )}
                           {atomData.email && (
-                            <p>📧 {atomData.email}</p>
+                            <p>Email: {atomData.email}</p>
                           )}
                           {atomData.website && (
                             <p>Web: <a href={atomData.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{atomData.website}</a></p>
@@ -269,7 +269,7 @@ export function AccountInfo({ accountInfo, onRefresh }: AccountInfoProps) {
                             <p className="truncate">{atomData.bio}</p>
                           )}
                           {atomData.email && (
-                            <p>📧 {atomData.email}</p>
+                            <p>Email: {atomData.email}</p>
                           )}
                         </div>
                       )}
@@ -309,11 +309,11 @@ export function AccountInfo({ accountInfo, onRefresh }: AccountInfoProps) {
                   <span className="font-mono text-xs text-gray-600">
                     {triple.subject?.slice(0, 8)}...
                   </span>
-                  <span className="text-gray-400">→</span>
+                  <span className="text-gray-400">-></span>
                   <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">
                     {triple.predicate}
                   </span>
-                  <span className="text-gray-400">→</span>
+                  <span className="text-gray-400">-></span>
                   <span className="font-mono text-xs text-gray-600">
                     {triple.object?.slice(0, 8)}...
                   </span>
