@@ -12,7 +12,7 @@ export function PortfolioCreatePage() {
     setCreated(true)
     // Optionally redirect after a delay
     setTimeout(() => {
-      router.push('/portfolio')
+      router.push('/hub')
     }, 3000)
   }
 
@@ -32,7 +32,7 @@ export function PortfolioCreatePage() {
             </div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Portfolio Created Successfully!</h2>
             <p className="text-gray-600 mb-4">
-              Your portfolio has been created on the blockchain. Redirecting to portfolio page...
+              Your portfolio has been created on the blockchain. Redirecting to hub page...
             </p>
           </div>
         </div>
