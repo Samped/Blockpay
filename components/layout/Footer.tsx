@@ -27,8 +27,8 @@ export function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href="/portfolio" className="text-gray-600 hover:text-primary transition-colors">
-                  Portfolio
+                <Link href="/hub" className="text-gray-600 hover:text-primary transition-colors">
+                  Hub
                 </Link>
               </li>
             </ul>
@@ -83,7 +83,7 @@ export function Footer() {
         </div>
 
         <div className="mt-12 pt-8 border-t border-gray-100 text-center text-sm text-gray-500">
-          <p>© {new Date().getFullYear()} BlockPay. Built on Intuition&apos;s Knowledge Graph.</p>
+          <p>(c) {new Date().getFullYear()} BlockPay. Built on Intuition&apos;s Knowledge Graph.</p>
         </div>
       </div>
     </footer>
