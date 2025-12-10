@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useAccount, usePublicClient } from 'wagmi'
 import { fetchAllPortfolios, fetchPortfoliosByCreator, Portfolio } from '@/lib/portfolioFetcher'
 import { PortfolioCreateForm } from './PortfolioCreateForm'
+import { PortfolioDetail } from './PortfolioDetail'
 
 export function PortfolioShowcase() {
   const { address, isConnected } = useAccount()
@@ -17,11 +18,14 @@ export function PortfolioShowcase() {
   const [tagFilter, setTagFilter] = useState<string>('')
   const [showFilterMenu, setShowFilterMenu] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
 
   const loadPortfolios = async () => {
     setLoading(true)
     try {
-      console.log('[INFO] Loading portfolios, filter:', filter, 'address:', address)
+      console.log('[INFO] ========== Loading portfolios ==========')
+      console.log('[INFO] Filter:', filter, 'Address:', address)
+      
       if (filter === 'mine' && address) {
         // Try reading portfolio ID from contract, then fetch from GraphQL
         if (publicClient) {
@@ -45,31 +49,54 @@ export function PortfolioShowcase() {
                 args: [address as `0x${string}`],
               }) as `0x${string}`
 
+              console.log('[INFO] Contract read result - profileId:', profileId)
+              console.log('[INFO] Is zero address?', profileId === '0x0000000000000000000000000000000000000000000000000000000000000000')
+
               if (profileId && profileId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-                console.log('[INFO] Found portfolio ID from contract:', profileId)
+                console.log('[INFO] ✅ Found portfolio ID from contract:', profileId)
+                console.log('[INFO] Portfolio ID (full):', profileId)
                 // Fetch from GraphQL (datavass)
                 const { fetchPortfolioByProfileId } = await import('@/lib/portfolioFetcher')
-                console.log('[INFO] Attempting to fetch portfolio from datavass...')
-                const myPortfolio = await fetchPortfolioByProfileId(profileId)
-                console.log('[INFO] fetchPortfolioByProfileId result:', myPortfolio ? 'SUCCESS' : 'NULL')
+                console.log('[INFO] 🔍 Attempting to fetch portfolio from datavass...')
+                
+                // Try multiple times with delays (GraphQL indexing can take time)
+                let myPortfolio = null
+                for (let attempt = 0; attempt < 3; attempt++) {
+                  if (attempt > 0) {
+                    console.log(`[INFO] Retry attempt ${attempt + 1}/3, waiting 2 seconds...`)
+                    await new Promise(resolve => setTimeout(resolve, 2000))
+                  }
+                  myPortfolio = await fetchPortfolioByProfileId(profileId)
+                  if (myPortfolio) {
+                    console.log(`[INFO] ✅ Portfolio found on attempt ${attempt + 1}`)
+                    break
+                  }
+                }
+                
+                console.log('[INFO] 📦 fetchPortfolioByProfileId result:', myPortfolio ? '✅ SUCCESS' : '❌ NULL')
                 if (myPortfolio) {
-                  console.log('[INFO] Portfolio fetched from datavass:', {
+                  console.log('[INFO] ✅ Portfolio fetched from datavass:', {
                     profileId: myPortfolio.profileId,
                     hasProfileData: !!myPortfolio.profileData,
+                    profileDataKeys: myPortfolio.profileData ? Object.keys(myPortfolio.profileData) : [],
+                    profileName: myPortfolio.profileData?.name,
+                    profileBio: myPortfolio.profileData?.bio,
                     skillsCount: myPortfolio.skills.length,
                     tagsCount: myPortfolio.tags.length,
                   })
+                  console.log('[INFO] 🎨 Setting portfolios state with:', [myPortfolio])
                   setPortfolios([myPortfolio])
+                  console.log('[INFO] ✅ Portfolio state updated')
                   return
                 } else {
-                  console.log('[WARN] Portfolio ID found in contract but fetchPortfolioByProfileId returned null')
-                  console.log('[WARN] This could mean:')
-                  console.log('[WARN] 1. Portfolio not indexed in GraphQL yet')
-                  console.log('[WARN] 2. GraphQL query failed')
-                  console.log('[WARN] 3. Portfolio atom not found in GraphQL')
+                  console.log('[WARN] ⚠️ Portfolio ID found in contract but not indexed in GraphQL yet')
+                  console.log('[WARN] Portfolio ID:', profileId)
+                  console.log('[WARN] This is normal - GraphQL indexing can take 2-5 minutes')
+                  console.log('[WARN] Please wait a few minutes and refresh, or check the transaction on the block explorer')
                 }
               } else {
-                console.log('[INFO] No portfolio ID found in contract for address:', address)
+                console.log('[INFO] ℹ️ No portfolio ID found in contract for address:', address)
+                console.log('[INFO] This means no portfolio has been created yet for this address')
               }
             }
           } catch (error) {
@@ -77,12 +104,28 @@ export function PortfolioShowcase() {
           }
         }
         // Fallback to GraphQL query by creator
+        console.log('[INFO] Falling back to GraphQL query by creator')
         const myPortfolios = await fetchPortfoliosByCreator(address)
         console.log('[INFO] Found', myPortfolios.length, 'portfolios for creator')
+        if (myPortfolios.length > 0) {
+          console.log('[INFO] Setting portfolios from creator query:', myPortfolios.map(p => p.profileId.slice(0, 10)))
+        }
         setPortfolios(myPortfolios)
       } else {
+        console.log('[INFO] Loading ALL portfolios from datavass')
         const allPortfolios = await fetchAllPortfolios(50)
-        console.log('[INFO] Found', allPortfolios.length, 'total portfolios')
+        console.log('[INFO] Found', allPortfolios.length, 'total portfolios from datavass')
+        if (allPortfolios.length > 0) {
+          console.log('[INFO] Portfolio IDs:', allPortfolios.map(p => p.profileId.slice(0, 10)))
+          console.log('[INFO] Portfolio names:', allPortfolios.map(p => p.profileData?.name || 'No name'))
+        } else {
+          console.log('[WARN] ⚠️ No portfolios found!')
+          console.log('[WARN] This could mean:')
+          console.log('[WARN] 1. No portfolios have been created yet')
+          console.log('[WARN] 2. Portfolios are not indexed in GraphQL yet')
+          console.log('[WARN] 3. GraphQL query failed or returned no results')
+          console.log('[WARN] 4. Contract address mismatch (check .env.local)')
+        }
         setPortfolios(allPortfolios)
       }
     } catch (error) {
@@ -96,6 +139,20 @@ export function PortfolioShowcase() {
   useEffect(() => {
     loadPortfolios()
   }, [address, filter, refreshKey])
+
+  // Debug: Log portfolios state changes
+  useEffect(() => {
+    console.log('[DEBUG] Portfolios state changed:', {
+      count: portfolios.length,
+      portfolios: portfolios.map(p => ({
+        profileId: p.profileId?.slice(0, 20),
+        hasProfileData: !!p.profileData,
+        name: p.profileData?.name,
+        bio: p.profileData?.bio?.slice(0, 50),
+        skillsCount: p.skills.length,
+      })),
+    })
+  }, [portfolios])
 
   const handleCreateSuccess = () => {
     setShowCreateForm(false)
@@ -160,6 +217,18 @@ export function PortfolioShowcase() {
           Back to Portfolios
         </button>
         <PortfolioCreateForm onSuccess={handleCreateSuccess} onCancel={() => setShowCreateForm(false)} />
+      </div>
+    )
+  }
+
+  // Show portfolio detail if one is selected (after all hooks are called)
+  if (selectedProfileId) {
+    return (
+      <div className="container mx-auto px-4 py-16">
+        <PortfolioDetail
+          profileId={selectedProfileId}
+          onBack={() => setSelectedProfileId(null)}
+        />
       </div>
     )
   }
@@ -444,7 +513,11 @@ export function PortfolioShowcase() {
       {!loading && filteredPortfolios.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredPortfolios.map((portfolio) => (
-            <PortfolioCard key={portfolio.profileId} portfolio={portfolio} />
+            <PortfolioCard 
+              key={portfolio.profileId} 
+              portfolio={portfolio}
+              onClick={() => setSelectedProfileId(portfolio.profileId)}
+            />
           ))}
         </div>
       )}
@@ -474,14 +547,17 @@ export function PortfolioShowcase() {
   )
 }
 
-function PortfolioCard({ portfolio }: { portfolio: Portfolio }) {
+function PortfolioCard({ portfolio, onClick }: { portfolio: Portfolio; onClick: () => void }) {
   const formatAddress = (address: string) => {
     if (!address) return 'N/A'
     return address.slice(0, 6) + '...' + address.slice(-4)
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-soft hover:shadow-card-hover transition-all duration-300 hover:-translate-y-1 overflow-hidden">
+    <div 
+      onClick={onClick}
+      className="bg-white rounded-2xl border border-gray-100 shadow-soft hover:shadow-card-hover transition-all duration-300 hover:-translate-y-1 overflow-hidden cursor-pointer"
+    >
       {/* Profile Header */}
       <div className="p-6">
         <div className="flex items-start gap-4 mb-4">
