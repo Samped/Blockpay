@@ -212,7 +212,7 @@ export function CompletedJobs() {
               const jobId = jobIdMatch[1]
               if (!jobIds.find((j: any) => j.jobId === jobId)) {
                 jobIds.push({ jobId, completedAt: new Date().toISOString() })
-                console.log('➕ Found additional job from key:', key, 'JobId:', jobId)
+                console.log('Found additional job from key:', key, 'JobId:', jobId)
               }
             }
           }
@@ -551,7 +551,7 @@ export function CompletedJobs() {
               const key = localStorage.key(j)
               if (key && key.includes(`submission_metadata`) && key.includes(`${i}`)) {
                 possibleKeys.push(key)
-                console.log(`➕ Found potential key: ${key}`)
+                console.log(`Found potential key: ${key}`)
               }
             }
             
@@ -749,7 +749,7 @@ export function CompletedJobs() {
                     })}
                   />
                   <p className="text-xs text-green-600 mt-2 text-center">
-                    ✓ High resolution (no watermark)
+                    High resolution (no watermark)
                   </p>
                   <p className="text-xs text-gray-400 mt-1 text-center">
                     CID: {cleanCid.substring(0, 12)}...
