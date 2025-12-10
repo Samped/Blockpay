@@ -244,7 +244,7 @@ export function SubmissionForm({ jobId, onSuccess, onCancel }: SubmissionFormPro
           </p>
         )}
         <p className="mt-1 text-xs text-gray-400">
-          We’ll store this as the full‑resolution work, and automatically generate a low‑quality watermarked preview for the creator to review.
+          We'll store this as the full-resolution work, and automatically generate a low-quality watermarked preview for the creator to review.
         </p>
       </div>
 
