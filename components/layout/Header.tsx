@@ -59,8 +59,8 @@ export function Header() {
           <Link href="/creators" className="text-sm font-medium text-gray-700 hover:text-primary transition-colors">
             Top Creators
           </Link>
-          <Link href="/portfolio" className="text-sm font-medium text-gray-700 hover:text-primary transition-colors">
-            Portfolio
+          <Link href="/hub" className="text-sm font-medium text-gray-700 hover:text-primary transition-colors">
+            Hub
           </Link>
           {isConnected && (
             <Link href="/dashboard" className="text-sm font-medium text-gray-700 hover:text-primary transition-colors">
