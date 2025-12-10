@@ -12,7 +12,7 @@ Traditional creative marketplaces such as Fiverr, Upwork, or Behance are central
 
 These platforms:
 
-- Enforce high platform fees (10–20%)
+- Enforce high platform fees (10-20%)
 - Retain custody of user data and payouts
 - Do not provide verifiable or portable reputation
 - Lack transparency in ranking and payment distribution
