@@ -53,11 +53,11 @@ export function PortfolioShowcase() {
               console.log('[INFO] Is zero address?', profileId === '0x0000000000000000000000000000000000000000000000000000000000000000')
 
               if (profileId && profileId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-                console.log('[INFO] ✅ Found portfolio ID from contract:', profileId)
+                console.log('[INFO] Found portfolio ID from contract:', profileId)
                 console.log('[INFO] Portfolio ID (full):', profileId)
                 // Fetch from GraphQL (datavass)
                 const { fetchPortfolioByProfileId } = await import('@/lib/portfolioFetcher')
-                console.log('[INFO] 🔍 Attempting to fetch portfolio from datavass...')
+                console.log('[INFO] Attempting to fetch portfolio from datavass...')
                 
                 // Try multiple times with delays (GraphQL indexing can take time)
                 let myPortfolio = null
@@ -68,14 +68,14 @@ export function PortfolioShowcase() {
                   }
                   myPortfolio = await fetchPortfolioByProfileId(profileId)
                   if (myPortfolio) {
-                    console.log(`[INFO] ✅ Portfolio found on attempt ${attempt + 1}`)
+                    console.log(`[INFO] Portfolio found on attempt ${attempt + 1}`)
                     break
                   }
                 }
                 
-                console.log('[INFO] 📦 fetchPortfolioByProfileId result:', myPortfolio ? '✅ SUCCESS' : '❌ NULL')
+                console.log('[INFO] fetchPortfolioByProfileId result:', myPortfolio ? 'SUCCESS' : 'NULL')
                 if (myPortfolio) {
-                  console.log('[INFO] ✅ Portfolio fetched from datavass:', {
+                  console.log('[INFO] Portfolio fetched from datavass:', {
                     profileId: myPortfolio.profileId,
                     hasProfileData: !!myPortfolio.profileData,
                     profileDataKeys: myPortfolio.profileData ? Object.keys(myPortfolio.profileData) : [],
@@ -84,18 +84,18 @@ export function PortfolioShowcase() {
                     skillsCount: myPortfolio.skills.length,
                     tagsCount: myPortfolio.tags.length,
                   })
-                  console.log('[INFO] 🎨 Setting portfolios state with:', [myPortfolio])
+                  console.log('[INFO] Setting portfolios state with:', [myPortfolio])
                   setPortfolios([myPortfolio])
-                  console.log('[INFO] ✅ Portfolio state updated')
+                  console.log('[INFO] Portfolio state updated')
                   return
                 } else {
-                  console.log('[WARN] ⚠️ Portfolio ID found in contract but not indexed in GraphQL yet')
+                  console.log('[WARN] Portfolio ID found in contract but not indexed in GraphQL yet')
                   console.log('[WARN] Portfolio ID:', profileId)
                   console.log('[WARN] This is normal - GraphQL indexing can take 2-5 minutes')
                   console.log('[WARN] Please wait a few minutes and refresh, or check the transaction on the block explorer')
                 }
               } else {
-                console.log('[INFO] ℹ️ No portfolio ID found in contract for address:', address)
+                console.log('[INFO] No portfolio ID found in contract for address:', address)
                 console.log('[INFO] This means no portfolio has been created yet for this address')
               }
             }
@@ -119,7 +119,7 @@ export function PortfolioShowcase() {
           console.log('[INFO] Portfolio IDs:', allPortfolios.map(p => p.profileId.slice(0, 10)))
           console.log('[INFO] Portfolio names:', allPortfolios.map(p => p.profileData?.name || 'No name'))
         } else {
-          console.log('[WARN] ⚠️ No portfolios found!')
+          console.log('[WARN] No portfolios found!')
           console.log('[WARN] This could mean:')
           console.log('[WARN] 1. No portfolios have been created yet')
           console.log('[WARN] 2. Portfolios are not indexed in GraphQL yet')
@@ -214,7 +214,7 @@ export function PortfolioShowcase() {
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          Back to Portfolios
+          Back to Hub
         </button>
         <PortfolioCreateForm onSuccess={handleCreateSuccess} onCancel={() => setShowCreateForm(false)} />
       </div>
@@ -238,19 +238,20 @@ export function PortfolioShowcase() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-8">
         <div>
-          <h1 className="text-4xl md:text-5xl font-bold mb-3 text-gray-900">Portfolio Showcase</h1>
+          <h1 className="text-4xl md:text-5xl font-bold mb-3 text-gray-900">Hub</h1>
           <p className="text-lg text-gray-600 font-light">
             Discover creators and their verified work on the blockchain
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => {
               setRefreshKey(prev => prev + 1)
             }}
             disabled={loading}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2"
-            title="Refresh portfolios"
+            className="h-11 w-11 border border-gray-200 rounded-full text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center justify-center shadow-sm transition-all"
+            title="Refresh"
+            aria-label="Refresh"
           >
             <svg 
               className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} 
@@ -260,28 +261,38 @@ export function PortfolioShowcase() {
             >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            Refresh
           </button>
           {isConnected && (
             <>
               <button
                 onClick={() => setFilter(filter === 'all' ? 'mine' : 'all')}
-                className={`px-6 py-3 rounded-full font-semibold transition-all ${
+                className={`h-11 w-11 rounded-full border flex items-center justify-center transition-all shadow-sm ${
                   filter === 'mine'
-                    ? 'bg-primary text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'bg-primary border-primary text-white hover:bg-[#0052CC]'
+                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
                 }`}
+                title={filter === 'mine' ? 'Viewing My Hub' : 'Viewing All Hubs'}
+                aria-label={filter === 'mine' ? 'Viewing My Hub' : 'Viewing All Hubs'}
               >
-                {filter === 'mine' ? 'My Portfolios' : 'All Portfolios'}
+                {filter === 'mine' ? (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.121 17.804A4 4 0 0112 15a4 4 0 016.879 2.804M12 11a4 4 0 100-8 4 4 0 000 8z" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                )}
               </button>
               <button
                 onClick={() => setShowCreateForm(true)}
-                className="px-6 py-3 bg-primary text-white rounded-full font-semibold hover:bg-[#0052CC] transition-all flex items-center gap-2"
+                className="h-11 w-11 bg-primary text-white rounded-full font-semibold hover:bg-[#0052CC] transition-all flex items-center justify-center shadow-sm"
+                title="Create Hub"
+                aria-label="Create Hub"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                 </svg>
-                Create Portfolio
               </button>
             </>
           )}
