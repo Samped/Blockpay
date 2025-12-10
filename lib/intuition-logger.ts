@@ -45,7 +45,7 @@ export async function logUploadToIntuition(metadata: Record<string, any>) {
   try {
     const client = getWalletClient()
     if (!client) {
-      // Not configured – just return metadata so caller knows we skipped on-chain logging
+      // Not configured - just return metadata so caller knows we skipped on-chain logging
       return { skipped: true, reason: 'Intuition logger not configured', metadata }
     }
 
