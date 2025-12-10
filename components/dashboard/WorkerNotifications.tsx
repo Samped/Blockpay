@@ -408,11 +408,11 @@ export function WorkerNotifications() {
                       <span>
                         {getJobTitle(notification)} (Job #{notification.jobId})
                       </span>
-                      <span>•</span>
+                      <span>|</span>
                       <span className="font-semibold text-green-600">
                         Payment: {formatTrustAmount(BigInt(notification.paymentAmount))} TRUST
                       </span>
-                      <span>•</span>
+                      <span>|</span>
                       <span>{new Date(notification.createdAt).toLocaleDateString()}</span>
                     </div>
                   )}
