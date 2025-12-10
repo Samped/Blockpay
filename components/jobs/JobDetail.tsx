@@ -852,7 +852,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
       }
       
       // Notification will be created in useEffect when transaction is confirmed
-      console.log('⏳ Waiting for transaction confirmation to create notification...')
+      console.log('Waiting for transaction confirmation to create notification...')
     } catch (err: any) {
       setError(err.message || 'Failed to approve submission')
     }
@@ -955,7 +955,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
               onClick={onBack}
               className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors ml-4"
             >
-              ← Back
+              Back
             </button>
           )}
         </div>
@@ -1164,7 +1164,7 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
                 <ul className="space-y-2">
                   {job.requirements.map((req, index) => (
                     <li key={index} className="flex items-start gap-2">
-                      <span className="text-primary mt-1.5">•</span>
+                      <span className="text-primary mt-1.5">-</span>
                       <span className="text-base text-gray-700">{req}</span>
                     </li>
                   ))}
