@@ -14,6 +14,126 @@ export const PORTFOLIO_CONTRACT_ABI = [
     outputs: [],
   },
   {
+    name: 'setPredicateIds',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'names', type: 'string[]', internalType: 'string[]' },
+      { name: 'ids', type: 'bytes32[]', internalType: 'bytes32[]' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'setPredicateId',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'name', type: 'string', internalType: 'string' },
+      { name: 'id', type: 'bytes32', internalType: 'bytes32' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'updatePredicateId',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'name', type: 'string', internalType: 'string' },
+      { name: 'newId', type: 'bytes32', internalType: 'bytes32' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'addProfileImages',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'profileId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'imageHashes', type: 'string[]', internalType: 'string[]' },
+    ],
+    outputs: [
+      { name: 'imageAtomId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'tripleId', type: 'bytes32', internalType: 'bytes32' },
+    ],
+  },
+  {
+    name: 'updateProfileSkills',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'profileId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'skills', type: 'string[]', internalType: 'string[]' },
+    ],
+    outputs: [
+      { name: 'skillAtomId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'tripleId', type: 'bytes32', internalType: 'bytes32' },
+    ],
+  },
+  {
+    name: 'updateProfileTags',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'profileId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'tags', type: 'string[]', internalType: 'string[]' },
+    ],
+    outputs: [
+      { name: 'tagAtomId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'tripleId', type: 'bytes32', internalType: 'bytes32' },
+    ],
+  },
+  {
+    name: 'updateProfileSocials',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'profileId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'socials', type: 'string[]', internalType: 'string[]' },
+    ],
+    outputs: [
+      { name: 'socialAtomId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'tripleId', type: 'bytes32', internalType: 'bytes32' },
+    ],
+  },
+  {
+    name: 'updateProfileAchievements',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'profileId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'achievements', type: 'string[]', internalType: 'string[]' },
+    ],
+    outputs: [
+      { name: 'achievementAtomId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'tripleId', type: 'bytes32', internalType: 'bytes32' },
+    ],
+  },
+  {
+    name: 'updateProfileProjects',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'profileId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'projects', type: 'string[]', internalType: 'string[]' },
+    ],
+    outputs: [
+      { name: 'projectAtomId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'tripleId', type: 'bytes32', internalType: 'bytes32' },
+    ],
+  },
+  {
+    name: 'trustPortfolio',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'profileId', type: 'bytes32', internalType: 'bytes32' },
+    ],
+    outputs: [
+      { name: 'trustAtomId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'trustTripleId', type: 'bytes32', internalType: 'bytes32' },
+    ],
+  },
+  {
     name: 'batchCreatePortfolio',
     type: 'function',
     stateMutability: 'payable',
@@ -124,16 +244,35 @@ export const PORTFOLIO_CONTRACT_ABI = [
       { name: 'predicateId', type: 'bytes32', indexed: false, internalType: 'bytes32' },
     ],
   },
+  {
+    name: 'ImageHashesStored',
+    type: 'event',
+    inputs: [
+      { name: 'profileId', type: 'bytes32', indexed: true, internalType: 'bytes32' },
+      { name: 'imageAtomId', type: 'bytes32', indexed: false, internalType: 'bytes32' },
+      { name: 'hashCount', type: 'uint256', indexed: false, internalType: 'uint256' },
+    ],
+  },
+  {
+    name: 'TrustedByAdded',
+    type: 'event',
+    inputs: [
+      { name: 'profileId', type: 'bytes32', indexed: true, internalType: 'bytes32' },
+      { name: 'voter', type: 'address', indexed: true, internalType: 'address' },
+      { name: 'trustAtomId', type: 'bytes32', indexed: false, internalType: 'bytes32' },
+      { name: 'trustTripleId', type: 'bytes32', indexed: false, internalType: 'bytes32' },
+    ],
+  },
 ] as const
 
 /**
  * Portfolio Contract Address
- * Deployed contract address: 0xB70dc7656e57c60e63c7494E129aE252aC0146da
+ * Deployed contract address: 0xb1A2c93234f3eC33f9813b2243B7F4daF2e01592
  * Network: Intuition Testnet (Chain ID: 13579)
  * 
  * To override, set NEXT_PUBLIC_PORTFOLIO_CONTRACT_ADDRESS in .env.local
  */
-export const PORTFOLIO_CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_PORTFOLIO_CONTRACT_ADDRESS || '0xB70dc7656e57c60e63c7494E129aE252aC0146da') as `0x${string}`
+export const PORTFOLIO_CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_PORTFOLIO_CONTRACT_ADDRESS || '0xb1A2c93234f3eC33f9813b2243B7F4daF2e01592') as `0x${string}`
 
 /**
  * Parse TRUST amount (same as ETH parsing)
@@ -152,12 +291,18 @@ export function formatTrustAmount(amount: bigint): string {
 /**
  * Calculate total fee for portfolio creation
  * @param profileCount Number of profile atoms (always 1)
- * @param projectCount Number of project atoms
- * @param skillCount Number of skills
- * @param tagCount Number of tags
- * @param socialCount Number of social links
- * @param achievementCount Number of achievements
+ * @param projectCount Number of projects (array length, but only 1 atom if > 0)
+ * @param skillCount Number of skills (array length, but only 1 atom if > 0)
+ * @param tagCount Number of tags (array length, but only 1 atom if > 0)
+ * @param socialCount Number of social links (array length, but only 1 atom if > 0)
+ * @param achievementCount Number of achievements (array length, but only 1 atom if > 0)
  * @returns Total fee in wei
+ * 
+ * New structure: 1 atom + 1 triple per category (not per item)
+ * - 1 profile atom
+ * - Up to 5 category atoms (skills, tags, socials, achievements, projects) - one per non-empty category
+ * - Up to 5 triples (one per non-empty category)
+ * - Platform fee: 0.1 TRUST
  */
 export function calculatePortfolioFee(
   profileCount: number,
@@ -167,16 +312,26 @@ export function calculatePortfolioFee(
   socialCount: number,
   achievementCount: number
 ): bigint {
-  // Atoms: 1 profile + projects + value atoms (skills + tags + socials + achievements)
-  const totalAtoms = profileCount + projectCount + skillCount + tagCount + socialCount + achievementCount
+  // Atoms: 1 profile + up to 5 category atoms (one per non-empty category)
+  let totalValueAtoms = 0
+  if (skillCount > 0) totalValueAtoms += 1
+  if (tagCount > 0) totalValueAtoms += 1
+  if (socialCount > 0) totalValueAtoms += 1
+  if (achievementCount > 0) totalValueAtoms += 1
+  if (projectCount > 0) totalValueAtoms += 1
   
-  // Triples: skills + tags + socials + achievements
-  const totalTriples = skillCount + tagCount + socialCount + achievementCount
+  const totalAtoms = profileCount + totalValueAtoms // Profile + category atoms
+  
+  // Triples: one per non-empty category
+  const totalTriples = totalValueAtoms
   
   // Fee per atom/triple is 0.1 TRUST
   const feePerItem = parseTrustAmount('0.1')
   
-  return BigInt(totalAtoms + totalTriples) * feePerItem
+  // Platform fee: 0.1 TRUST
+  const platformFee = parseTrustAmount('0.1')
+  
+  return BigInt(totalAtoms + totalTriples) * feePerItem + platformFee
 }
 
 /**
@@ -200,8 +355,8 @@ export function validatePortfolioInput(data: {
   // Profile JSON validation
   if (!data.profileJson || data.profileJson.trim().length === 0) {
     errors.push('Profile JSON is required')
-  } else if (data.profileJson.length > 10000) {
-    errors.push('Profile JSON is too long (max 10000 characters)')
+  } else if (data.profileJson.length > 50000) {
+    errors.push('Profile JSON is too long (max 50000 characters)')
   }
   
   // Array length validation
