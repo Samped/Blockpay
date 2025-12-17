@@ -1,9 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { usePublicClient } from 'wagmi'
+import { useState, useEffect, useRef } from 'react'
+import { useAccount, usePublicClient } from 'wagmi'
 import { Portfolio, fetchPortfolioByProfileId } from '@/lib/portfolioFetcher'
 import { JOB_POOL_ADDRESS, JOB_POOL_ABI, JobStatus } from '@/lib/jobPoolContract'
+import { PORTFOLIO_CONTRACT_ADDRESS } from '@/lib/portfolioContract'
+import { uploadToIPFS as uploadFilebaseToIPFS } from '@/frontend/uploadToIPFS'
+import { usePortfolioContract } from '@/hooks/usePortfolioContract'
 
 interface PortfolioDetailProps {
   profileId: string
@@ -23,15 +26,88 @@ interface CompletedJob {
 
 export function PortfolioDetail({ profileId, onBack }: PortfolioDetailProps) {
   const publicClient = usePublicClient()
+  const { address, isConnected } = useAccount()
+  const { addProfileImages, isPending: isAddingImages, isConfirmed: imagesConfirmed, txHash: imagesTxHash } = usePortfolioContract()
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [completedJobs, setCompletedJobs] = useState<CompletedJob[]>([])
   const [loadingJobs, setLoadingJobs] = useState(false)
+  const [isOwner, setIsOwner] = useState(false)
+  const [imageUploadLoading, setImageUploadLoading] = useState(false)
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null)
+  const [imageUploadSuccess, setImageUploadSuccess] = useState<string | null>(null)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const addImagesRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [showAddImagesModal, setShowAddImagesModal] = useState(false)
 
   useEffect(() => {
     loadPortfolio()
   }, [profileId])
+
+  // Determine ownership (creatorAddress match or contract mapping)
+  useEffect(() => {
+    const checkOwner = async () => {
+      if (!portfolio || !address) {
+        setIsOwner(false)
+        return
+      }
+
+      const sameId = (a?: string | null, b?: string | null) => {
+        if (!a || !b) return false
+        const na = a.toLowerCase().replace(/^0x/, '')
+        const nb = b.toLowerCase().replace(/^0x/, '')
+        return na === nb
+      }
+
+      // Basic check: creator address matches
+      if (portfolio.creatorAddress && portfolio.creatorAddress.toLowerCase() === address.toLowerCase()) {
+        setIsOwner(true)
+        return
+      }
+
+      // Fallback: read userPortfolioAtoms from contract
+      try {
+        if (publicClient && PORTFOLIO_CONTRACT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
+          const USER_PORTFOLIO_ABI = [
+            {
+              name: 'userPortfolioAtoms',
+              type: 'function',
+              stateMutability: 'view',
+              inputs: [{ name: '', type: 'address' }],
+              outputs: [{ name: '', type: 'bytes32' }],
+            },
+          ] as const
+
+          const profileFromContract = await publicClient.readContract({
+            address: PORTFOLIO_CONTRACT_ADDRESS,
+            abi: USER_PORTFOLIO_ABI,
+            functionName: 'userPortfolioAtoms',
+            args: [address as `0x${string}`],
+          }) as `0x${string}`
+
+          const normalizedFromContract = (profileFromContract || '').toLowerCase()
+          const normalizedProfile = (portfolio.profileId || '').toLowerCase()
+
+          if (
+            normalizedFromContract &&
+            normalizedFromContract !== '0x0000000000000000000000000000000000000000000000000000000000000000' &&
+            sameId(normalizedFromContract, normalizedProfile)
+          ) {
+            setIsOwner(true)
+            return
+          }
+        }
+      } catch (err) {
+        console.warn('[PortfolioDetail] Owner check failed:', err)
+      }
+
+      setIsOwner(false)
+    }
+
+    checkOwner()
+  }, [portfolio, address, publicClient])
 
   useEffect(() => {
     if (portfolio?.creatorAddress) {
@@ -39,19 +115,59 @@ export function PortfolioDetail({ profileId, onBack }: PortfolioDetailProps) {
     }
   }, [portfolio?.creatorAddress, publicClient])
 
+  // Watch for image upload transaction confirmation
+  useEffect(() => {
+    const handleImageUploadConfirmation = async () => {
+      if (imagesConfirmed && imagesTxHash && imageUploadLoading) {
+        try {
+          console.log('[INFO] Image upload transaction confirmed:', imagesTxHash)
+          setImageUploadSuccess('Images added successfully! Refreshing portfolio...')
+          
+          // Clear files and close modal
+          setPendingFiles([])
+          if (fileInputRef.current) {
+            fileInputRef.current.value = ''
+          }
+          setShowAddImagesModal(false)
+
+          // Wait a moment for indexing, then reload portfolio
+          await new Promise(resolve => setTimeout(resolve, 2000))
+          
+          const refreshed = await fetchPortfolioByProfileId(profileId, undefined, publicClient || undefined)
+          if (refreshed) {
+            setPortfolio(refreshed)
+            setImageUploadSuccess('Portfolio updated with new images!')
+          } else {
+            setImageUploadSuccess('Images added! Portfolio will refresh shortly (indexing may take a few moments).')
+          }
+        } catch (err) {
+          console.error('[ERROR] Error handling image upload confirmation:', err)
+          setImageUploadError('Images added but failed to refresh portfolio. Please refresh the page.')
+        } finally {
+          setImageUploadLoading(false)
+        }
+      }
+    }
+
+    handleImageUploadConfirmation()
+  }, [imagesConfirmed, imagesTxHash, imageUploadLoading, profileId, publicClient])
+
   const loadPortfolio = async () => {
     setLoading(true)
     setError(null)
     try {
-      const data = await fetchPortfolioByProfileId(profileId)
+      console.log('[PortfolioDetail] Loading portfolio with profileId:', profileId)
+      const data = await fetchPortfolioByProfileId(profileId, undefined, publicClient || undefined)
       if (data) {
+        console.log('[PortfolioDetail] Portfolio loaded successfully:', data.profileId)
         setPortfolio(data)
       } else {
-        setError('Portfolio not found')
+        console.error('[PortfolioDetail] Portfolio not found for profileId:', profileId)
+        setError(`Portfolio not found. The portfolio may not be indexed yet (wait 2-5 minutes after creation), or the profile ID may be incorrect. Profile ID: ${profileId.slice(0, 20)}...`)
       }
     } catch (err) {
-      console.error('Error loading portfolio:', err)
-      setError('Failed to load portfolio')
+      console.error('[PortfolioDetail] Error loading portfolio:', err)
+      setError(`Failed to load portfolio: ${err instanceof Error ? err.message : 'Unknown error'}`)
     } finally {
       setLoading(false)
     }
@@ -162,6 +278,130 @@ export function PortfolioDetail({ profileId, onBack }: PortfolioDetailProps) {
     }
   }
 
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setPendingFiles(Array.from(e.target.files))
+      setImageUploadError(null)
+      setImageUploadSuccess(null)
+    }
+  }
+
+  const uploadImagesToPortfolio = async (files?: File[]) => {
+    if (!portfolio) return
+    if (!isConnected || !address) {
+      setImageUploadError('Please connect your wallet')
+      return
+    }
+    if (!isOwner) {
+      // Proceed but warn if ownership not verified (contract itself enforces permissions if any)
+      setImageUploadError('Ownership could not be verified. Proceeding to upload.')
+    }
+
+    const selected = files && files.length > 0 ? files : pendingFiles
+    if (selected.length === 0) {
+      setImageUploadError('Please select at least one image')
+      return
+    }
+
+    setImageUploadLoading(true)
+    setImageUploadError(null)
+    setImageUploadSuccess(null)
+
+    try {
+      const hashes: string[] = []
+      console.log('[INFO] Uploading', selected.length, 'images to DataBass/Filebase...')
+      
+      for (let i = 0; i < selected.length; i++) {
+        const file = selected[i]
+        console.log(`[INFO] Uploading image ${i + 1}/${selected.length}:`, file.name, `(${(file.size / 1024).toFixed(2)} KB)`)
+        
+        const uploadRes = await uploadFilebaseToIPFS(file, {
+          uploader: address,
+          type: 'portfolio-showcase',
+        })
+        
+        // Extract CID - remove ipfs:// prefix if present, and any leading/trailing whitespace
+        let cid = uploadRes.cid.replace(/^ipfs:\/\//, '').replace(/^\/ipfs\//, '').trim()
+        
+        // Validate CID format (basic check - should be alphanumeric with some special chars)
+        if (!cid || cid.length === 0) {
+          throw new Error(`Failed to get CID for image ${i + 1}`)
+        }
+        if (cid.length > 200) {
+          throw new Error(`CID for image ${i + 1} is too long (${cid.length} chars, max 200)`)
+        }
+        
+        console.log(`[INFO] Image ${i + 1} uploaded successfully. CID: ${cid}`)
+        hashes.push(cid)
+      }
+
+      console.log('[INFO] All images uploaded. CIDs:', hashes)
+      console.log('[INFO] Calling addProfileImages with profileId:', portfolio.profileId)
+      
+      // Check when portfolio was created to determine if we should wait
+      let portfolioAgeMinutes = Infinity
+      if (portfolio.createdAt) {
+        try {
+          const createdAt = new Date(portfolio.createdAt)
+          const now = new Date()
+          portfolioAgeMinutes = (now.getTime() - createdAt.getTime()) / (1000 * 60)
+          console.log(`[INFO] Portfolio age: ${portfolioAgeMinutes.toFixed(1)} minutes`)
+          
+          if (portfolioAgeMinutes < 20) {
+            console.warn(`[WARN] Portfolio was created only ${portfolioAgeMinutes.toFixed(1)} minutes ago.`)
+            console.warn('[WARN] MultiVault may not have indexed the atoms yet. Consider waiting longer.')
+            setImageUploadSuccess(`Portfolio created ${portfolioAgeMinutes.toFixed(0)} minutes ago. MultiVault may need more time to index...`)
+          }
+        } catch (dateErr) {
+          console.warn('[WARN] Could not parse portfolio creation date:', dateErr)
+        }
+      }
+      
+      // Try the transaction with retry logic
+      let result = await addProfileImages(portfolio.profileId as `0x${string}`, hashes)
+      
+      // If it fails with the MultiVault error, wait and retry once
+      if (!result.success && result.error?.includes('0x7b0a37cf')) {
+        console.warn('[WARN] First attempt failed with MultiVault error. Waiting 10 seconds and retrying...')
+        setImageUploadSuccess('First attempt failed. Waiting 10 seconds for MultiVault to index atoms and retrying...')
+        
+        await new Promise(resolve => setTimeout(resolve, 10000))
+        
+        result = await addProfileImages(portfolio.profileId as `0x${string}`, hashes)
+        
+        // If it still fails after retry, provide specific guidance
+        if (!result.success && result.error?.includes('0x7b0a37cf')) {
+          if (portfolioAgeMinutes < 20) {
+            throw new Error(
+              `❌ MultiVault Error: Profile atom not available for triple creation.\n\n` +
+              `Your portfolio was created ${portfolioAgeMinutes.toFixed(0)} minutes ago.\n\n` +
+              `MultiVault needs at least 20 minutes to index atoms before they can be used in triples.\n\n` +
+              `✅ Please wait ${Math.ceil(20 - portfolioAgeMinutes)} more minutes and try again.\n\n` +
+              `The portfolio exists in GraphQL, but MultiVault's on-chain state hasn't caught up yet.`
+            )
+          } else {
+            throw new Error(
+              result.error || 'Failed to add images on-chain. The profile atom may not exist in MultiVault. Please verify your portfolio was created successfully.'
+            )
+          }
+        }
+      }
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to add images on-chain')
+      }
+
+      // Transaction submitted successfully - wait for confirmation
+      setImageUploadSuccess('Transaction submitted! Waiting for confirmation...')
+      
+      // Don't close modal or clear files yet - wait for confirmation
+    } catch (err: any) {
+      setImageUploadError(err?.message || 'Failed to add images')
+    } finally {
+      setImageUploadLoading(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-8 py-12">
@@ -206,6 +446,8 @@ export function PortfolioDetail({ profileId, onBack }: PortfolioDetailProps) {
     socialsCount: portfolio.socials.length,
     achievementsCount: portfolio.achievements.length,
     projectsCount: portfolio.projects.length,
+    showcaseImagesCount: portfolio.showcaseImages?.length || 0,
+    showcaseImages: portfolio.showcaseImages,
     skills: portfolio.skills,
     tags: portfolio.tags,
     socials: portfolio.socials,
@@ -213,22 +455,67 @@ export function PortfolioDetail({ profileId, onBack }: PortfolioDetailProps) {
     projects: portfolio.projects,
   })
 
+  const handlePlusClick = () => {
+    setImageUploadError(null)
+    setImageUploadSuccess(null)
+    setPendingFiles([])
+    setShowAddImagesModal(true)
+  }
+
+  const handlePlusFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const files = Array.from(e.target.files)
+      setPendingFiles(files)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 py-16">
       <div className="max-w-3xl mx-auto px-6">
-        {/* Back Button */}
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-gray-500 hover:text-gray-900 mb-8 text-sm"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          Back
-        </button>
+        {/* Top Bar */}
+        <div className="flex items-center justify-between mb-8">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-2 text-gray-500 hover:text-gray-900 text-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back
+          </button>
+
+          {/* Add Images quick action */}
+          <button
+            onClick={handlePlusClick}
+            disabled={imageUploadLoading}
+            className="flex items-center gap-2 px-3 py-2 rounded-full border border-gray-200 bg-white shadow-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={isOwner ? 'Add images to your portfolio' : 'Connect owner wallet to add images'}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6" />
+            </svg>
+            <span className="text-xs font-medium">Add Images</span>
+          </button>
+        </div>
 
         {/* Container with rounded edges */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 md:p-16">
+          {/* Upload status messages */}
+          {(imageUploadError || imageUploadSuccess) && (
+            <div className="mb-6">
+              {imageUploadError && (
+                <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded">
+                  {imageUploadError}
+                </div>
+              )}
+              {imageUploadSuccess && (
+                <div className="p-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded mt-2">
+                  {imageUploadSuccess}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Atom ID Reference */}
           <div className="mb-10 pb-8 border-b border-gray-200">
             <div className="text-xs text-gray-500 font-mono">
@@ -478,6 +765,63 @@ export function PortfolioDetail({ profileId, onBack }: PortfolioDetailProps) {
             </section>
           )}
 
+          {/* Showcase Images Section */}
+          {portfolio.showcaseImages && portfolio.showcaseImages.length > 0 && (
+            <section>
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-6">Showcase</h2>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {portfolio.showcaseImages.map((cid, index) => {
+                  const cleanCid = cid.replace(/^ipfs:\/\//, '').replace(/^\/ipfs\//, '').replace(/^\/+/, '')
+                  const imageUrl = `/api/ipfs/filebase/image-fullres?cid=${encodeURIComponent(cleanCid)}&t=${Date.now()}`
+                  
+                  console.log('[PortfolioDetail] Rendering showcase image:', { index, cid, cleanCid, imageUrl })
+                  
+                  return (
+                    <div
+                      key={index}
+                      className="relative group cursor-pointer"
+                      onClick={() => window.open(imageUrl, '_blank')}
+                    >
+                      <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
+                        <img
+                          src={imageUrl}
+                          alt={`Showcase ${index + 1}`}
+                          className="w-full h-full object-cover group-hover:opacity-90 transition-opacity"
+                          onLoad={() => {
+                            console.log('[PortfolioDetail] Showcase image loaded successfully:', cleanCid)
+                          }}
+                          onError={(e) => {
+                            console.error('[PortfolioDetail] Showcase image failed to load:', { cid, cleanCid, imageUrl })
+                            // Fallback if image fails to load
+                            const target = e.target as HTMLImageElement
+                            target.style.display = 'none'
+                            const parent = target.parentElement
+                            if (parent) {
+                              parent.innerHTML = `
+                                <div class="w-full h-full flex items-center justify-center text-gray-400">
+                                  <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                </div>
+                              `
+                            }
+                          }}
+                        />
+                      </div>
+                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all rounded-lg flex items-center justify-center">
+                        <svg className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Add Images section removed; handled by top-right plus button */}
+
           {/* Completed Jobs Section */}
           <section>
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-6">Completed Jobs</h2>
@@ -548,6 +892,116 @@ export function PortfolioDetail({ profileId, onBack }: PortfolioDetailProps) {
         </div>
         </div>
       </div>
+
+      {/* Add Images Modal */}
+      {showAddImagesModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-lg p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Add Images</h3>
+              <button
+                onClick={() => {
+                  if (imageUploadLoading || isAddingImages) return // Don't allow closing during upload/transaction
+                  setShowAddImagesModal(false)
+                  setPendingFiles([])
+                  setImageUploadError(null)
+                  setImageUploadSuccess(null)
+                  if (fileInputRef.current) fileInputRef.current.value = ''
+                }}
+                disabled={imageUploadLoading || isAddingImages}
+                className="text-gray-500 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {imageUploadError && (
+              <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded">
+                {imageUploadError}
+              </div>
+            )}
+            {imageUploadSuccess && (
+              <div className="p-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded">
+                {imageUploadSuccess}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handlePlusFileChange}
+                className="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-[#0052CC]"
+              />
+              {pendingFiles.length > 0 && (
+                <div className="text-xs text-gray-600">
+                  Selected {pendingFiles.length} image{pendingFiles.length > 1 ? 's' : ''}
+                </div>
+              )}
+            </div>
+
+            {pendingFiles.length > 0 && (
+              <ul className="max-h-40 overflow-y-auto text-sm text-gray-700 space-y-1 border border-gray-100 rounded-lg p-3 bg-gray-50">
+                {pendingFiles.map((file, idx) => (
+                  <li key={idx} className="flex items-center justify-between">
+                    <span className="truncate">{file.name}</span>
+                    <button
+                      onClick={() => {
+                        const next = [...pendingFiles]
+                        next.splice(idx, 1)
+                        setPendingFiles(next)
+                      }}
+                      className="text-red-500 hover:text-red-700 text-xs"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={() => {
+                  if (imageUploadLoading || isAddingImages) return // Don't allow closing during upload/transaction
+                  setShowAddImagesModal(false)
+                  setPendingFiles([])
+                  setImageUploadError(null)
+                  setImageUploadSuccess(null)
+                  if (fileInputRef.current) fileInputRef.current.value = ''
+                }}
+                disabled={imageUploadLoading || isAddingImages}
+                className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => uploadImagesToPortfolio(pendingFiles)}
+                disabled={imageUploadLoading || isAddingImages || pendingFiles.length === 0}
+                className="px-4 py-2 bg-primary text-white rounded-md text-sm font-medium hover:bg-[#0052CC] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {imageUploadLoading && !isAddingImages
+                  ? 'Uploading to IPFS...'
+                  : isAddingImages && !imagesConfirmed
+                  ? imagesTxHash
+                    ? 'Confirming transaction...'
+                    : 'Waiting for wallet...'
+                  : imagesConfirmed
+                  ? 'Success!'
+                  : 'Upload & Save'}
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Images upload to DataBass/Filebase; their CIDs are stored on-chain in a single transaction.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
