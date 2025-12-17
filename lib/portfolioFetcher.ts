@@ -6,6 +6,50 @@
 import { intuitionClient } from './intuitionClient'
 import { PORTFOLIO_CONTRACT_ADDRESS, PORTFOLIO_CONTRACT_ABI } from './portfolioContract'
 
+/**
+ * Read predicate IDs from the contract
+ * This is a helper function that can be called with a publicClient
+ */
+export async function getPredicateIdsFromContract(publicClient?: any): Promise<Record<string, string>> {
+  const predicateMap: Record<string, string> = {}
+  
+  if (publicClient && PORTFOLIO_CONTRACT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
+    try {
+      const predicateNames = ['portfolioSkill', 'portfolioTag', 'portfolioSocial', 'portfolioAchievement', 'portfolioProject', 'portfolioImage', 'portfolioTrustedBy']
+      for (const name of predicateNames) {
+        try {
+          const id = await publicClient.readContract({
+            address: PORTFOLIO_CONTRACT_ADDRESS,
+            abi: PORTFOLIO_CONTRACT_ABI,
+            functionName: 'predicateIds',
+            args: [name],
+          }) as `0x${string}`
+          
+          if (id && id !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+            predicateMap[name] = id.toLowerCase()
+            console.log(`[INFO] Read predicate ID for '${name}':`, id.slice(0, 20))
+          }
+        } catch (err) {
+          console.log(`[WARN] Failed to read predicate ID for '${name}':`, err)
+        }
+      }
+    } catch (err) {
+      console.error('[ERROR] Failed to read predicate IDs from contract:', err)
+    }
+  }
+  
+  // Fallback to hardcoded values if contract read fails
+  if (Object.keys(predicateMap).length === 0) {
+    predicateMap.skill = '0xa9c2d5889ae8904c067cad5e7d5e667711f1e23a57fe3096cdd4fb00691e73e0'
+    predicateMap.tag = '0x42300b4ce5316f4246e5ec389fda28a4c9e354425f049f39fe602b5ce0b78b51'
+    predicateMap.social = '0xbe1d5024ae24c26ed549eca1af20897dc8951b29c125f5b66ba13a8ffacf9a19'
+    predicateMap.achievement = '0x710db8a9eb61b73986bbdc424e0bdd8bf17582773ff458639ef0379936b1791e'
+    console.log('[INFO] Using hardcoded predicate IDs as fallback')
+  }
+  
+  return predicateMap
+}
+
 export interface Portfolio {
   profileId: string
   creatorAddress: string
@@ -21,15 +65,33 @@ export interface Portfolio {
   socials: Array<{ platform: string; url: string }>
   achievements: string[]
   projects: Array<{ title: string; description: string; category?: string }>
+  showcaseImages: string[] // Array of IPFS CIDs
   createdAt?: string
 }
 
 /**
  * Fetch portfolio by profile atom ID
  */
-export async function fetchPortfolioByProfileId(profileId: string, profileAtom?: any): Promise<Portfolio | null> {
+export async function fetchPortfolioByProfileId(profileId: string, profileAtom?: any, publicClient?: any): Promise<Portfolio | null> {
   try {
-    console.log('[INFO] Fetching portfolio by profileId:', profileId)
+    console.log('[INFO] ========== Fetching portfolio ==========')
+    console.log('[INFO] Profile ID:', profileId)
+    console.log('[INFO] Profile ID length:', profileId.length)
+    console.log('[INFO] Has profileAtom:', !!profileAtom)
+    console.log('[INFO] Has publicClient:', !!publicClient)
+    
+    // Normalize profileId - ensure it's lowercase and has 0x prefix if it's a hex string
+    let normalizedProfileId = profileId
+    if (profileId.startsWith('0x')) {
+      normalizedProfileId = profileId.toLowerCase()
+    } else if (/^[0-9a-fA-F]{64}$/.test(profileId)) {
+      // It's a hex string without 0x prefix
+      normalizedProfileId = '0x' + profileId.toLowerCase()
+    } else {
+      normalizedProfileId = profileId.toLowerCase()
+    }
+    
+    console.log('[INFO] Normalized profile ID:', normalizedProfileId)
     
     // 1. Get the profile atom - use provided atom or fetch via GraphQL
     let atom = profileAtom
@@ -49,20 +111,89 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
           }
         }
       `
-      const result = await intuitionClient.graphqlQuery(atomQuery, { termId: profileId.toLowerCase() })
+      console.log('[INFO] Querying GraphQL for atom with termId:', normalizedProfileId)
+      const result = await intuitionClient.graphqlQuery(atomQuery, { termId: normalizedProfileId })
       if (result?.errors) {
-        console.error('[ERROR] GraphQL errors when fetching atom:', result.errors)
+        console.error('[ERROR] GraphQL errors when fetching atom:', JSON.stringify(result.errors, null, 2))
       }
       const atoms = result?.atoms || []
       console.log('[INFO] GraphQL query for atom returned', atoms.length, 'atoms')
       if (atoms.length === 0) {
         console.log('[WARN] Profile atom not found for ID:', profileId)
-        console.log('[WARN] Tried querying with termId:', profileId.toLowerCase())
-        console.log('[WARN] This might mean the atom is not indexed yet, or the termId format is wrong')
-        return null
+        console.log('[WARN] Tried querying with termId:', normalizedProfileId)
+        console.log('[WARN] This might mean:')
+        console.log('[WARN] 1. The atom is not indexed yet (wait 2-5 minutes after creation)')
+        console.log('[WARN] 2. The termId format is wrong')
+        console.log('[WARN] 3. The atom was not created by the contract')
+        
+        // Try multiple variations of the profileId
+        const variations = []
+        
+        // Try without 0x prefix
+        if (normalizedProfileId.startsWith('0x')) {
+          variations.push(normalizedProfileId.slice(2))
+        } else {
+          variations.push('0x' + normalizedProfileId)
+        }
+        
+        // Try with uppercase
+        variations.push(normalizedProfileId.toUpperCase())
+        if (normalizedProfileId.startsWith('0x')) {
+          variations.push('0x' + normalizedProfileId.slice(2).toUpperCase())
+        }
+        
+        // Try original format
+        if (profileId !== normalizedProfileId) {
+          variations.push(profileId)
+        }
+        
+        console.log('[INFO] Trying', variations.length, 'variations of profileId')
+        for (const variation of variations) {
+          if (variation === normalizedProfileId) continue // Already tried
+          console.log('[INFO] Trying variation:', variation.slice(0, 30))
+          try {
+            const result2 = await intuitionClient.graphqlQuery(atomQuery, { termId: variation })
+            const atoms2 = result2?.atoms || []
+            if (atoms2.length > 0) {
+              console.log('[INFO] Found atom with variation:', variation.slice(0, 30))
+              atom = atoms2[0]
+              break
+            }
+          } catch (err) {
+            console.log('[DEBUG] Variation query failed:', err)
+          }
+        }
+        
+        if (!atom) {
+          console.error('[ERROR] Could not find profile atom after trying all variations')
+          
+          // Last resort: If we have a publicClient, try to verify the profileId exists in the contract
+          // This helps distinguish between "not indexed yet" vs "invalid profileId"
+          if (publicClient) {
+            try {
+              const PORTFOLIO_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_PORTFOLIO_CONTRACT_ADDRESS as `0x${string}`
+              if (PORTFOLIO_CONTRACT_ADDRESS && PORTFOLIO_CONTRACT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
+                // Try to read from contract to see if this profileId exists
+                // Note: The contract doesn't have a direct way to check if a profileId exists,
+                // but we can check if it's a valid bytes32 format
+                console.log('[INFO] ProfileId format check:', {
+                  length: normalizedProfileId.length,
+                  isHex: /^0x[0-9a-fA-F]{64}$/.test(normalizedProfileId),
+                  original: profileId,
+                  normalized: normalizedProfileId,
+                })
+              }
+            } catch (err) {
+              console.log('[DEBUG] Contract check failed:', err)
+            }
+          }
+          
+          return null
+        }
+      } else {
+        atom = atoms[0]
+        console.log('[INFO] Found atom in GraphQL:', atom.term_id)
       }
-      atom = atoms[0]
-      console.log('[INFO] Found atom in GraphQL:', atom.term_id)
     }
     
     if (!atom) {
@@ -111,23 +242,15 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
       fullData: profileData,
     })
 
-    // 2. Get predicate IDs directly from the contract (more reliable than GraphQL)
-    // Use the predicate IDs from the transaction you showed:
-    // skill: 0xa9c2d5889ae8904c067cad5e7d5e667711f1e23a57fe3096cdd4fb00691e73e0
-    // tag: 0x42300b4ce5316f4246e5ec389fda28a4c9e354425f049f39fe602b5ce0b78b51
-    // social: 0xbe1d5024ae24c26ed549eca1af20897dc8951b29c125f5b66ba13a8ffacf9a19
-    // achievement: 0x710db8a9eb61b73986bbdc424e0bdd8bf17582773ff458639ef0379936b1791e
+    // 2. Get predicate IDs - try to read from contract, fallback to hardcoded
+    let predicateMap = await getPredicateIdsFromContract(publicClient)
     
-    // For now, use hardcoded predicate IDs from your transaction
-    // TODO: Read from contract using publicClient when available
-    const predicateMap: Record<string, string> = {
-      skill: '0xa9c2d5889ae8904c067cad5e7d5e667711f1e23a57fe3096cdd4fb00691e73e0',
-      tag: '0x42300b4ce5316f4246e5ec389fda28a4c9e354425f049f39fe602b5ce0b78b51',
-      social: '0xbe1d5024ae24c26ed549eca1af20897dc8951b29c125f5b66ba13a8ffacf9a19',
-      achievement: '0x710db8a9eb61b73986bbdc424e0bdd8bf17582773ff458639ef0379936b1791e',
+    // Ensure project predicate is set (might not be in contract yet)
+    if (!predicateMap.project || predicateMap.project === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+      predicateMap.project = '0x0000000000000000000000000000000000000000000000000000000000000000' // Will be detected from triples
     }
     
-    console.log('[INFO] Using predicate IDs from contract initialization:', Object.keys(predicateMap))
+    console.log('[INFO] Using predicate IDs:', Object.keys(predicateMap).filter(k => predicateMap[k] !== '0x0000000000000000000000000000000000000000000000000000000000000000'))
 
     // 3. Get triples from profile atom
     // Try multiple query formats to find one that works
@@ -323,6 +446,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
         socials: [],
         achievements: [],
         projects: [],
+        showcaseImages: [],
         createdAt: atom.created_at,
       }
       console.log('[INFO] Returning portfolio (no triples):', {
@@ -359,6 +483,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
         socials: [],
         achievements: [],
         projects: [],
+        showcaseImages: [],
         createdAt: atom.created_at,
       }
       console.log('[INFO] Returning portfolio (no object IDs):', {
@@ -414,18 +539,71 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
     const socials: Array<{ platform: string; url: string }> = []
     const achievements: string[] = []
     const projects: Array<{ title: string; description: string; category?: string }> = []
+    const showcaseImages: string[] = []
 
-    const skillPredicateId = predicateMap['skill']
-    const tagPredicateId = predicateMap['tag']
-    const socialPredicateId = predicateMap['social']
-    const achievementPredicateId = predicateMap['achievement']
-    const projectPredicateId = predicateMap['project']
+    // Get predicate IDs - also try to find image and project predicates from triples if not set
+    // NOTE: This must happen AFTER atomMap is built (step 5)
+    const skillPredicateId = predicateMap['portfolioSkill']
+    const tagPredicateId = predicateMap['portfolioTag']
+    const socialPredicateId = predicateMap['portfolioSocial']
+    const achievementPredicateId = predicateMap['portfolioAchievement']
+    let imagePredicateId = predicateMap['portfolioImage']
+    let projectPredicateId = predicateMap['portfolioProject']
+    
+    // If image predicate not set, try to find it from triples by checking atom data
+    if (!imagePredicateId || imagePredicateId === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+      console.log('[INFO] Image predicate ID not set, searching in triples...')
+      for (const triple of triples) {
+        const objId = (triple.object?.term_id || triple.object || '').toLowerCase()
+        const obj = atomMap[objId]
+        if (obj) {
+          let objData = obj.data
+          if (typeof objData === 'string') {
+            try {
+              objData = JSON.parse(objData)
+            } catch {}
+          }
+          const dataType = objData?.data?.type || objData?.type
+          if (dataType === 'image_list') {
+            imagePredicateId = (triple.predicate?.term_id || triple.predicate || '').toLowerCase()
+            predicateMap['portfolioImage'] = imagePredicateId
+            console.log('[INFO] Found image predicate ID from triples:', imagePredicateId.slice(0, 20))
+            break
+          }
+        }
+      }
+    }
+    
+    // If project predicate not set, try to find it from triples by checking atom data
+    if (!projectPredicateId || projectPredicateId === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+      console.log('[INFO] Project predicate ID not set, searching in triples...')
+      for (const triple of triples) {
+        const objId = (triple.object?.term_id || triple.object || '').toLowerCase()
+        const obj = atomMap[objId]
+        if (obj) {
+          let objData = obj.data
+          if (typeof objData === 'string') {
+            try {
+              objData = JSON.parse(objData)
+            } catch {}
+          }
+          const dataType = objData?.data?.type || objData?.type
+          if (dataType === 'projects') {
+            projectPredicateId = (triple.predicate?.term_id || triple.predicate || '').toLowerCase()
+            predicateMap['portfolioProject'] = projectPredicateId
+            console.log('[INFO] Found project predicate ID from triples:', projectPredicateId.slice(0, 20))
+            break
+          }
+        }
+      }
+    }
     
     console.log('[INFO] Predicate IDs for parsing:', {
       skill: skillPredicateId?.slice(0, 20),
       tag: tagPredicateId?.slice(0, 20),
       social: socialPredicateId?.slice(0, 20),
       achievement: achievementPredicateId?.slice(0, 20),
+      image: imagePredicateId?.slice(0, 20),
       project: projectPredicateId?.slice(0, 20),
     })
     console.log('[INFO] Processing', triples.length, 'triples to extract portfolio data')
@@ -468,6 +646,8 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
       const tagPredLower = tagPredicateId?.toLowerCase() || ''
       const socialPredLower = socialPredicateId?.toLowerCase() || ''
       const achievementPredLower = achievementPredicateId?.toLowerCase() || ''
+      const imagePredLower = imagePredicateId?.toLowerCase() || ''
+      const projectPredLower = projectPredicateId?.toLowerCase() || ''
 
       // Check if this is a value atom - GraphQL returns JsonObject type, but data contains type: "value"
       // The atom.data should be parsed JSON like {"type":"value","data":"..."}
@@ -478,15 +658,35 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
       const isProjectAtom = objectAtom.type === 'project' || 
                            (objectAtom.data?.type === 'project')
       
+      // Get the parsed atom data first
+      let atomData = objectAtom.data
+      if (typeof atomData === 'string') {
+        try {
+          atomData = JSON.parse(atomData)
+        } catch {
+          // Keep as string if parsing fails
+        }
+      }
+      
+      // NEW STRUCTURE: Contract stores arrays in single atoms
+      // Format: {"type":"value","data":{"type":"skills","values":["skill1","skill2"]}}
+      // For images: {"type":"value","data":{"type":"image_list","hashes":["cid1","cid2"]}}
+      const dataType = atomData?.data?.type || atomData?.type
+      const dataValues = atomData?.data?.values || atomData?.values
+      // For images, check hashes in data.data.hashes (nested structure) or data.hashes (flat)
+      const dataHashes = atomData?.data?.hashes || atomData?.hashes || (atomData?.data?.data?.hashes) // For images
+      
       // Debug: Log the atom structure
       if (triplePredicateId === skillPredLower || triplePredicateId === tagPredLower || 
-          triplePredicateId === socialPredLower || triplePredicateId === achievementPredLower) {
+          triplePredicateId === socialPredLower || triplePredicateId === achievementPredLower ||
+          (projectPredLower && triplePredicateId === projectPredLower)) {
         console.log('[DEBUG] Atom structure:', {
           atomType: objectAtom.type,
           dataType: typeof objectAtom.data,
           dataKeys: typeof objectAtom.data === 'object' ? Object.keys(objectAtom.data || {}) : 'not object',
-          dataTypeField: objectAtom.data?.type,
-          dataDataField: typeof objectAtom.data?.data,
+          dataTypeField: atomData?.data?.type || atomData?.type,
+          dataValuesType: Array.isArray(dataValues) ? 'array' : typeof dataValues,
+          dataValuesLength: Array.isArray(dataValues) ? dataValues.length : 'not array',
           isValueAtom,
           isProjectAtom,
         })
@@ -497,103 +697,239 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
         objectType: objectAtom.type,
         isValueAtom,
         isProjectAtom,
-        objectData: typeof objectAtom.data === 'object' ? objectAtom.data?.type : 'not object',
+        dataType,
+        hasValues: Array.isArray(dataValues),
+        valuesLength: Array.isArray(dataValues) ? dataValues.length : 0,
         matchesSkill: skillPredLower && triplePredicateId === skillPredLower,
         matchesTag: tagPredLower && triplePredicateId === tagPredLower,
         matchesSocial: socialPredLower && triplePredicateId === socialPredLower,
         matchesAchievement: achievementPredLower && triplePredicateId === achievementPredLower,
+        matchesProject: projectPredLower && triplePredicateId === projectPredLower,
       })
-
+      
       if (skillPredLower && triplePredicateId === skillPredLower && isValueAtom) {
-        // Extract value from data structure: {"type":"value","data":"skill name"}
-        let skillValue = objectAtom.data?.data
-        if (!skillValue && typeof objectAtom.data === 'object' && objectAtom.data.data) {
-          skillValue = objectAtom.data.data
-        }
-        if (typeof skillValue === 'string') {
-          skills.push(skillValue)
-          console.log('[INFO] Added skill:', skillValue)
+        // New structure: {"type":"value","data":{"type":"skills","values":["skill1","skill2"]}}
+        if (dataType === 'skills' && Array.isArray(dataValues)) {
+          // Extract all skills from the array
+          dataValues.forEach((skill: any) => {
+            if (typeof skill === 'string' && skill.trim()) {
+              skills.push(skill.trim())
+            }
+          })
+          console.log('[INFO] Added', dataValues.length, 'skills from array')
         } else {
-          console.log('[DEBUG] Skill value is not a string:', typeof skillValue, skillValue, 'Full data:', objectAtom.data)
+          // Fallback: old structure with single value
+          let skillValue = atomData?.data?.data || atomData?.data
+          if (typeof skillValue === 'string') {
+            skills.push(skillValue)
+            console.log('[INFO] Added skill (single):', skillValue)
+          } else {
+            console.log('[DEBUG] Skill data format unexpected:', { dataType, dataValues, atomData })
+          }
         }
       } else if (tagPredLower && triplePredicateId === tagPredLower && isValueAtom) {
-        // Extract value from data structure: {"type":"value","data":"tag name"}
-        let tagValue = objectAtom.data?.data
-        if (!tagValue && typeof objectAtom.data === 'object' && objectAtom.data.data) {
-          tagValue = objectAtom.data.data
-        }
-        if (typeof tagValue === 'string') {
-          tags.push(tagValue)
-          console.log('[INFO] Added tag:', tagValue)
+        // New structure: {"type":"value","data":{"type":"tags","values":["tag1","tag2"]}}
+        if (dataType === 'tags' && Array.isArray(dataValues)) {
+          dataValues.forEach((tag: any) => {
+            if (typeof tag === 'string' && tag.trim()) {
+              tags.push(tag.trim())
+            }
+          })
+          console.log('[INFO] Added', dataValues.length, 'tags from array')
         } else {
-          console.log('[DEBUG] Tag value is not a string:', typeof tagValue, tagValue, 'Full data:', objectAtom.data)
+          // Fallback: old structure
+          let tagValue = atomData?.data?.data || atomData?.data
+          if (typeof tagValue === 'string') {
+            tags.push(tagValue)
+            console.log('[INFO] Added tag (single):', tagValue)
+          } else {
+            console.log('[DEBUG] Tag data format unexpected:', { dataType, dataValues, atomData })
+          }
         }
       } else if (socialPredLower && triplePredicateId === socialPredLower && isValueAtom) {
-        // Extract social data: {"type":"value","data":{"platform":"GitHub","url":"..."}}
-        let socialData = objectAtom.data?.data
-        if (!socialData && typeof objectAtom.data === 'object' && objectAtom.data.data) {
-          socialData = objectAtom.data.data
-        }
-        
-        // Handle both object and string formats
-        if (typeof socialData === 'object' && socialData.platform && socialData.url) {
-          socials.push({ platform: socialData.platform, url: socialData.url })
-          console.log('[INFO] Added social:', socialData.platform)
-        } else if (typeof socialData === 'string') {
-          try {
-            const parsed = JSON.parse(socialData)
-            if (parsed.platform && parsed.url) {
-              socials.push({ platform: parsed.platform, url: parsed.url })
-              console.log('[INFO] Added social (parsed):', parsed.platform)
+        // New structure: {"type":"value","data":{"type":"socials","values":[{"platform":"GitHub","url":"..."}]}}
+        if (dataType === 'socials' && Array.isArray(dataValues)) {
+          dataValues.forEach((social: any) => {
+            if (typeof social === 'object' && social.platform && social.url) {
+              socials.push({ platform: social.platform, url: social.url })
+            } else if (typeof social === 'string') {
+              try {
+                const parsed = JSON.parse(social)
+                if (parsed.platform && parsed.url) {
+                  socials.push({ platform: parsed.platform, url: parsed.url })
+                }
+              } catch {
+                console.log('[DEBUG] Failed to parse social string:', social)
+              }
             }
-          } catch {
-            console.log('[DEBUG] Failed to parse social data:', socialData)
-          }
+          })
+          console.log('[INFO] Added', dataValues.length, 'socials from array')
         } else {
-          console.log('[DEBUG] Social data format unexpected:', typeof socialData, socialData, 'Full data:', objectAtom.data)
+          // Fallback: old structure
+          let socialData = atomData?.data?.data || atomData?.data
+          if (typeof socialData === 'object' && socialData.platform && socialData.url) {
+            socials.push({ platform: socialData.platform, url: socialData.url })
+          } else if (typeof socialData === 'string') {
+            try {
+              const parsed = JSON.parse(socialData)
+              if (parsed.platform && parsed.url) {
+                socials.push({ platform: parsed.platform, url: parsed.url })
+              }
+            } catch {
+              console.log('[DEBUG] Failed to parse social data:', socialData)
+            }
+          } else {
+            console.log('[DEBUG] Social data format unexpected:', { dataType, dataValues, atomData })
+          }
         }
       } else if (achievementPredLower && triplePredicateId === achievementPredLower && isValueAtom) {
-        // Extract value from data structure: {"type":"value","data":"achievement text"}
-        let achievementValue = objectAtom.data?.data
-        if (!achievementValue && typeof objectAtom.data === 'object' && objectAtom.data.data) {
-          achievementValue = objectAtom.data.data
-        }
-        if (typeof achievementValue === 'string') {
-          achievements.push(achievementValue)
-          console.log('[INFO] Added achievement:', achievementValue.slice(0, 50))
-        } else {
-          console.log('[DEBUG] Achievement value is not a string:', typeof achievementValue, achievementValue, 'Full data:', objectAtom.data)
-        }
-      } else if (isProjectAtom) {
-        // Extract project data: {"type":"project","data":{"title":"...","description":"..."}}
-        let projectData = objectAtom.data?.data
-        if (!projectData && typeof objectAtom.data === 'object' && objectAtom.data.data) {
-          projectData = objectAtom.data.data
-        }
-        if (typeof projectData === 'object') {
-          projects.push({
-            title: projectData.title || '',
-            description: projectData.description || '',
-            category: projectData.category,
-            image: projectData.image,
-            externalLink: projectData.externalLink,
+        // New structure: {"type":"value","data":{"type":"achievements","values":["achievement1","achievement2"]}}
+        if (dataType === 'achievements' && Array.isArray(dataValues)) {
+          dataValues.forEach((achievement: any) => {
+            if (typeof achievement === 'string' && achievement.trim()) {
+              achievements.push(achievement.trim())
+            }
           })
-          console.log('[INFO] Added project:', projectData.title)
+          console.log('[INFO] Added', dataValues.length, 'achievements from array')
         } else {
-          console.log('[DEBUG] Project data format unexpected:', typeof projectData, projectData, 'Full data:', objectAtom.data)
+          // Fallback: old structure
+          let achievementValue = atomData?.data?.data || atomData?.data
+          if (typeof achievementValue === 'string') {
+            achievements.push(achievementValue)
+            console.log('[INFO] Added achievement (single):', achievementValue.slice(0, 50))
+          } else {
+            console.log('[DEBUG] Achievement data format unexpected:', { dataType, dataValues, atomData })
+          }
+        }
+      } else if ((imagePredLower && triplePredicateId === imagePredLower && isValueAtom) || (dataType === 'image_list' && isValueAtom)) {
+        // New structure: {"type":"value","data":{"type":"image_list","hashes":["cid1","cid2",...]}}
+        // Also check by data type in case predicate wasn't found
+        if (dataType === 'image_list') {
+          // If predicate wasn't found, set it now
+          if (!imagePredLower || imagePredLower === '') {
+            imagePredicateId = triplePredicateId
+            predicateMap['portfolioImage'] = imagePredicateId
+            console.log('[INFO] Found image predicate ID from triple processing:', imagePredicateId.slice(0, 20))
+          }
+          
+          // The contract stores: {"type":"value","data":{"type":"image_list","hashes":["cid1","cid2",...]}}
+          // Images use "hashes" not "values", so check dataHashes first
+          const hashes = dataHashes || atomData?.data?.hashes || atomData?.hashes
+          if (Array.isArray(hashes)) {
+            hashes.forEach((hash: any) => {
+              if (typeof hash === 'string' && hash.trim()) {
+                showcaseImages.push(hash.trim())
+              }
+            })
+            console.log('[INFO] Added', hashes.length, 'showcase images from array:', hashes.slice(0, 3))
+          } else {
+            console.log('[DEBUG] Image data format unexpected - hashes not found:', { 
+              dataType, 
+              dataValues, 
+              dataHashes,
+              hashes, 
+              atomDataKeys: Object.keys(atomData || {}),
+              atomDataDataKeys: Object.keys(atomData?.data || {}),
+              atomDataType: typeof atomData,
+              atomDataDataType: typeof atomData?.data,
+              fullAtomData: JSON.stringify(atomData).slice(0, 1000)
+            })
+          }
+        } else {
+          console.log('[DEBUG] Image data type mismatch:', { dataType, expected: 'image_list', isValueAtom, objectAtomType: objectAtom.type })
+        }
+      } else if ((projectPredLower && triplePredicateId === projectPredLower) || isProjectAtom || (dataType === 'projects' && Array.isArray(dataValues))) {
+        // New structure: {"type":"value","data":{"type":"projects","values":[{"title":"...","description":"..."}]}}
+        if (dataType === 'projects' && Array.isArray(dataValues)) {
+          dataValues.forEach((project: any) => {
+            if (typeof project === 'object') {
+              projects.push({
+                title: project.title || '',
+                description: project.description || '',
+                category: project.category,
+                image: project.image || project.imageUrl,
+                externalLink: project.externalLink || project.link,
+              })
+            } else if (typeof project === 'string') {
+              try {
+                const parsed = JSON.parse(project)
+                projects.push({
+                  title: parsed.title || '',
+                  description: parsed.description || '',
+                  category: parsed.category,
+                  image: parsed.image || parsed.imageUrl,
+                  externalLink: parsed.externalLink || parsed.link,
+                })
+              } catch {
+                console.log('[DEBUG] Failed to parse project string:', project)
+              }
+            }
+          })
+          console.log('[INFO] Added', dataValues.length, 'projects from array')
+        } else {
+          // Fallback: old structure
+          let projectData = atomData?.data?.data || atomData?.data
+          if (typeof projectData === 'object') {
+            projects.push({
+              title: projectData.title || '',
+              description: projectData.description || '',
+              category: projectData.category,
+              image: projectData.image || projectData.imageUrl,
+              externalLink: projectData.externalLink || projectData.link,
+            })
+            console.log('[INFO] Added project (single):', projectData.title)
+          } else {
+            console.log('[DEBUG] Project data format unexpected:', { dataType, dataValues, atomData })
+          }
         }
       } else {
-        console.log('[DEBUG] Triple not matched:', {
-          predicateMatch: {
-            skill: skillPredLower && triplePredicateId === skillPredLower,
-            tag: tagPredLower && triplePredicateId === tagPredLower,
-            social: socialPredLower && triplePredicateId === socialPredLower,
-            achievement: achievementPredLower && triplePredicateId === achievementPredLower,
-          },
-          isValueAtom,
-          isProjectAtom,
-          objectType: objectAtom.type,
-        })
+        // Check if this might be a project triple (predicate might not be in map yet)
+        const projectPredLower = projectPredicateId?.toLowerCase() || ''
+        if (projectPredLower && triplePredicateId === projectPredLower) {
+          // Handle project parsing (same as above, but check predicate match)
+          if (dataType === 'projects' && Array.isArray(dataValues)) {
+            dataValues.forEach((project: any) => {
+              if (typeof project === 'object') {
+                projects.push({
+                  title: project.title || '',
+                  description: project.description || '',
+                  category: project.category,
+                  image: project.image || project.imageUrl,
+                  externalLink: project.externalLink || project.link,
+                })
+              } else if (typeof project === 'string') {
+                try {
+                  const parsed = JSON.parse(project)
+                  projects.push({
+                    title: parsed.title || '',
+                    description: parsed.description || '',
+                    category: parsed.category,
+                    image: parsed.image || parsed.imageUrl,
+                    externalLink: parsed.externalLink || parsed.link,
+                  })
+                } catch {
+                  console.log('[DEBUG] Failed to parse project string:', project)
+                }
+              }
+            })
+            console.log('[INFO] Added', dataValues.length, 'projects from array (by predicate)')
+          }
+        } else {
+          console.log('[DEBUG] Triple not matched:', {
+            predicateMatch: {
+              skill: skillPredLower && triplePredicateId === skillPredLower,
+              tag: tagPredLower && triplePredicateId === tagPredLower,
+              social: socialPredLower && triplePredicateId === socialPredLower,
+              achievement: achievementPredLower && triplePredicateId === achievementPredLower,
+              project: projectPredLower && triplePredicateId === projectPredLower,
+            },
+            isValueAtom,
+            isProjectAtom,
+            objectType: objectAtom.type,
+            dataType,
+            hasValues: Array.isArray(dataValues),
+          })
+        }
       }
     }
     
@@ -603,6 +939,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
     console.log('[INFO] Socials:', socials.length, socials)
     console.log('[INFO] Achievements:', achievements.length, achievements)
     console.log('[INFO] Projects:', projects.length, projects)
+    console.log('[INFO] Showcase Images:', showcaseImages.length, showcaseImages)
 
     const portfolio = {
       profileId,
@@ -613,6 +950,7 @@ export async function fetchPortfolioByProfileId(profileId: string, profileAtom?:
       socials,
       achievements,
       projects,
+      showcaseImages,
       createdAt: atom.created_at,
     }
     
