@@ -6,6 +6,7 @@ import { useAccount, usePublicClient } from 'wagmi'
 import { usePortfolioContract, PortfolioData } from '@/hooks/usePortfolioContract'
 import { formatTrustAmount, calculatePortfolioFee, PORTFOLIO_CONTRACT_ADDRESS, PORTFOLIO_CONTRACT_ABI } from '@/lib/portfolioContract'
 import { decodeEventLog } from 'viem'
+import { uploadToIPFS as uploadFilebaseToIPFS } from '@/frontend/uploadToIPFS'
 import { fetchPortfolioByProfileId } from '@/lib/portfolioFetcher'
 
 // Helper function to compress/resize image
@@ -74,8 +75,9 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
   const router = useRouter()
   const { isConnected } = useAccount()
   const publicClient = usePublicClient()
-  const { createPortfolio, isPending, isConfirmed, txHash, writeError, isPaused } = usePortfolioContract()
+  const { createPortfolio, addProfileImages, isPending, isConfirmed, txHash, writeError, isPaused } = usePortfolioContract()
   const [indexingStatus, setIndexingStatus] = useState<string | null>(null)
+  const [uploadingImages, setUploadingImages] = useState(false)
 
   // Form state
   const [profileData, setProfileData] = useState({
@@ -142,6 +144,9 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
   const [projects, setProjects] = useState<Array<{ title: string; description: string; imageFile: File | null; imagePreview: string; externalLink: string; category?: string }>>([
     { title: '', description: '', imageFile: null, imagePreview: '', externalLink: '' },
   ])
+
+  // Showcase images (work portfolio)
+  const [showcaseImages, setShowcaseImages] = useState<Array<{ file: File | null; preview: string; cid?: string }>>([])
 
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -225,7 +230,7 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
       }
 
       // Build profile JSON
-      const profileJson = JSON.stringify({
+      let profileJson = JSON.stringify({
         name: profileData.name,
         bio: profileData.bio,
         email: profileData.email || undefined,
@@ -233,23 +238,57 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
         profilePicture: profilePictureBase64 || undefined,
       })
       
-      // Check profile JSON length
-      if (profileJson.length > 10000) {
-        // Try without profile picture if it exists
+      // Check profile JSON length - if too long, try without picture
+      if (profileJson.length > 50000) {
         if (profilePictureBase64) {
+          // Try without profile picture
           const profileJsonWithoutPicture = JSON.stringify({
             name: profileData.name,
             bio: profileData.bio,
             email: profileData.email || undefined,
             website: profileData.website || undefined,
           })
-          if (profileJsonWithoutPicture.length <= 10000) {
-            setError('Profile picture is too large. Please use a smaller image or remove it.')
+          
+          if (profileJsonWithoutPicture.length <= 50000) {
+            console.warn(`[WARN] Profile picture too large (${profileJson.length} bytes), removing it`)
+            // Continue without picture
+            profileJson = profileJsonWithoutPicture
+          } else {
+            setError(`Profile data is too long (${profileJson.length} bytes, max 50,000). Please shorten your name or bio, or remove the profile picture.`)
             return
           }
+        } else {
+          setError(`Profile data is too long (${profileJson.length} bytes, max 50,000). Please shorten your name or bio.`)
+          return
         }
-        setError('Profile data is too long. Please shorten your name or bio.')
+      }
+      
+      // Final validation - ensure profileJson is within limits
+      if (profileJson.length > 50000) {
+        setError(`Profile JSON is still too long after processing (${profileJson.length} bytes, max 50,000). Please shorten your data.`)
         return
+      }
+      
+      console.log(`[INFO] Profile JSON length: ${profileJson.length} bytes (max 50,000)`)
+      
+      // Validate profile JSON doesn't contain profilePicture if it was too large
+      try {
+        const parsed = JSON.parse(profileJson)
+        if (parsed.profilePicture && profileJson.length > 40000) {
+          console.warn('[WARN] Profile picture detected but JSON is large, removing it')
+          const withoutPicture = JSON.stringify({
+            name: parsed.name,
+            bio: parsed.bio,
+            email: parsed.email,
+            website: parsed.website,
+          })
+          if (withoutPicture.length <= 50000) {
+            profileJson = withoutPicture
+            console.log('[INFO] Removed profile picture to stay within limits')
+          }
+        }
+      } catch (e) {
+        console.error('[ERROR] Failed to parse profile JSON for validation:', e)
       }
 
       // Build portfolio data
@@ -314,9 +353,55 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
 
       const result = await createPortfolio(portfolioData)
 
-      if (result.success) {
+      if (result.success && result.profileId) {
+        // Upload showcase images if any
+        if (showcaseImages.length > 0) {
+          setUploadingImages(true)
+          setIndexingStatus('Uploading showcase images to IPFS...')
+          
+          try {
+            // Upload all images to Filebase/DataBass via the shared helper (same flow as JobPool)
+            const imageHashes: string[] = []
+            
+            for (let i = 0; i < showcaseImages.length; i++) {
+              const image = showcaseImages[i]
+              if (!image.file) continue
+              
+              setIndexingStatus(`Uploading image ${i + 1}/${showcaseImages.length}...`)
+              
+              const uploadData = await uploadFilebaseToIPFS(image.file, {
+                uploader: address,
+                type: 'portfolio-showcase',
+              })
+              
+              const cid = uploadData.cid.replace(/^ipfs:\/\//, '') // Remove ipfs:// prefix
+              imageHashes.push(cid)
+            }
+            
+            // Add images to portfolio on-chain
+            if (imageHashes.length > 0) {
+              setIndexingStatus('Adding images to portfolio...')
+              const addImagesResult = await addProfileImages(result.profileId, imageHashes)
+              
+              if (!addImagesResult.success) {
+                console.warn('Failed to add images to portfolio:', addImagesResult.error)
+                // Don't fail the whole operation, just warn
+                setIndexingStatus('Portfolio created, but failed to add images. You can add them later.')
+              } else {
+                setIndexingStatus('Portfolio and images created successfully!')
+              }
+            }
+          } catch (imageError: any) {
+            console.error('Error uploading images:', imageError)
+            // Don't fail the whole operation, just warn
+            setIndexingStatus('Portfolio created, but failed to upload images. You can add them later.')
+          } finally {
+            setUploadingImages(false)
+          }
+        }
+        
         setSuccess(true)
-        if (result.profileId && result.txHash && onSuccess) {
+        if (result.txHash && onSuccess) {
           onSuccess({ profileId: result.profileId, txHash: result.txHash })
         }
       } else {
@@ -425,11 +510,66 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
     )
   }
 
+  // Calculate fee breakdown for display
+  const feeBreakdown = (() => {
+    let totalValueAtoms = 0
+    const categories: string[] = []
+    if (getAllSkills().length > 0) { totalValueAtoms += 1; categories.push('Skills') }
+    if (getAllTags().length > 0) { totalValueAtoms += 1; categories.push('Tags') }
+    if (getAllSocials().filter(s => s.platform.trim() && s.url.trim()).length > 0) { totalValueAtoms += 1; categories.push('Socials') }
+    if (achievements.filter(a => a.text.trim()).length > 0) { totalValueAtoms += 1; categories.push('Achievements') }
+    if (projects.filter(p => p.title.trim()).length > 0) { totalValueAtoms += 1; categories.push('Projects') }
+    
+    const totalAtoms = 1 + totalValueAtoms // Profile + categories
+    const totalTriples = totalValueAtoms
+    const atomTripleFee = (totalAtoms + totalTriples) * 0.1
+    const platformFee = 0.1
+    const totalFee = atomTripleFee + platformFee
+    
+    return { totalFee, categories, totalValueAtoms, atomTripleFee, platformFee }
+  })()
+
   return (
     <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-gray-100 shadow-soft p-8 max-w-4xl mx-auto">
       <div className="mb-8">
         <h2 className="text-3xl font-bold text-gray-900 mb-2">Create Your Portfolio</h2>
         <p className="text-gray-600">Build your professional portfolio on the blockchain</p>
+      </div>
+
+      {/* Fee Breakdown */}
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-gray-900">Estimated Fee Breakdown</h3>
+          <span className="text-lg font-bold text-primary">{feeBreakdown.totalFee.toFixed(4)} TRUST</span>
+        </div>
+        <div className="text-xs text-gray-600 space-y-1">
+          <div className="flex justify-between">
+            <span>Profile atom (1 × 0.1 TRUST)</span>
+            <span>0.1 TRUST</span>
+          </div>
+          {feeBreakdown.categories.length > 0 && (
+            <>
+              <div className="flex justify-between">
+                <span>Category atoms ({feeBreakdown.totalValueAtoms} × 0.1 TRUST)</span>
+                <span>{(feeBreakdown.totalValueAtoms * 0.1).toFixed(4)} TRUST</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Category triples ({feeBreakdown.totalValueAtoms} × 0.1 TRUST)</span>
+                <span>{(feeBreakdown.totalValueAtoms * 0.1).toFixed(4)} TRUST</span>
+              </div>
+              <div className="text-gray-500 mt-1">
+                Categories: {feeBreakdown.categories.join(', ') || 'None'}
+              </div>
+            </>
+          )}
+          <div className="flex justify-between pt-1 border-t border-blue-200">
+            <span className="font-semibold">Platform fee</span>
+            <span className="font-semibold">0.1 TRUST</span>
+          </div>
+        </div>
+        <p className="text-xs text-gray-500 mt-2">
+          Note: Each category (skills, tags, socials, achievements, projects) costs 0.2 TRUST total (0.1 for atom + 0.1 for triple), regardless of how many items you add.
+        </p>
       </div>
 
       {/* Error Messages */}
@@ -1106,6 +1246,82 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
         </div>
       </section>
 
+      {/* Showcase Your Work Section */}
+      <section className="mb-8">
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">Showcase Your Work</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Upload images of your work to showcase your portfolio. Images will be stored on IPFS.
+        </p>
+        
+        <div className="space-y-4">
+          {/* Image Upload Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {showcaseImages.map((image, index) => (
+              <div key={index} className="relative group">
+                <div className="aspect-square border-2 border-dashed border-gray-300 rounded-lg overflow-hidden bg-gray-50">
+                  {image.preview ? (
+                    <img
+                      src={image.preview}
+                      alt={`Showcase ${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-400">
+                      <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newImages = showcaseImages.filter((_, i) => i !== index)
+                    setShowcaseImages(newImages)
+                  }}
+                  className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+            
+            {/* Add Image Button */}
+            {showcaseImages.length < 200 && (
+              <label className="aspect-square border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors flex items-center justify-center">
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      const reader = new FileReader()
+                      reader.onloadend = () => {
+                        setShowcaseImages([...showcaseImages, { file, preview: reader.result as string }])
+                      }
+                      reader.readAsDataURL(file)
+                    }
+                  }}
+                />
+                <div className="text-center">
+                  <svg className="w-8 h-8 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span className="text-sm text-gray-600">Add Image</span>
+                </div>
+              </label>
+            )}
+          </div>
+          
+          {showcaseImages.length >= 200 && (
+            <p className="text-sm text-amber-600">Maximum 200 images reached</p>
+          )}
+        </div>
+      </section>
+
       {/* Submit Buttons */}
       <div className="flex gap-4 justify-end">
         {onCancel && (
@@ -1120,10 +1336,10 @@ export function PortfolioCreateForm({ onSuccess, onCancel }: PortfolioCreateForm
         )}
         <button
           type="submit"
-          disabled={isPending || isPaused}
+          disabled={isPending || isPaused || uploadingImages}
           className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-[#0052CC] disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isPending ? 'Creating Portfolio...' : 'Create Portfolio'}
+          {uploadingImages ? 'Uploading Images...' : isPending ? 'Creating Portfolio...' : 'Create Portfolio'}
         </button>
       </div>
     </form>
